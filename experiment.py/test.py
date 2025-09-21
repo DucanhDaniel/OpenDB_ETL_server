@@ -2,13 +2,12 @@ import requests
 import json
 import time
 import random
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date
 from calendar import monthrange
 from dotenv import load_dotenv
 import os
 
-# Tải các biến môi trường từ file .env
+# Tải biến môi trường
 load_dotenv()
 
 # --- CẤU HÌNH ---
@@ -24,14 +23,13 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
-# --- CÁC HÀM TIỆN ÍCH ---
-
 def chunk_list(data, size):
     """Chia một danh sách thành các danh sách con có kích thước `size`."""
     for i in range(0, len(data), size):
         yield data[i:i + size]
 
 def generate_monthly_date_chunks(start_date_str, end_date_str):
+    """Chia một khoảng thời gian thành các chunk theo tháng."""
     start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
     end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
     chunks = []
@@ -53,10 +51,8 @@ def generate_monthly_date_chunks(start_date_str, end_date_str):
         cursor_date = date(next_year, next_month, 1)
     return chunks
 
-# --- CÁC HÀM GỌI API VÀ XỬ LÝ DỮ LIỆU ---
-
 def make_api_request_with_backoff(session, params, max_retries=5, base_delay=3):
-    """Thực hiện một yêu cầu API với cơ chế thử lại khi gặp lỗi."""
+    """Thực hiện gọi API với cơ chế thử lại (exponential backoff)."""
     for attempt in range(max_retries):
         try:
             response = session.get(API_URL, params=params, timeout=60)
@@ -64,217 +60,203 @@ def make_api_request_with_backoff(session, params, max_retries=5, base_delay=3):
             data = response.json()
             if data.get("code") == 0: return data
             if "Too many requests" in data.get("message", ""):
-                print(f"  [RATE LIMIT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
+                print(f"   [RATE LIMIT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
             else:
-                print(f"  [LỖI API] {data.get('message')}")
+                print(f"   [LỖI API] {data.get('message')}")
                 return None
         except requests.exceptions.RequestException as e:
-            print(f"  [LỖI MẠNG] (lần {attempt + 1}/{max_retries}): {e}")
+            print(f"   [LỖI MẠNG] (lần {attempt + 1}/{max_retries}): {e}")
         if attempt < max_retries - 1:
             delay = (base_delay ** attempt) + random.uniform(0, 1)
-            print(f"  Thử lại sau {delay:.2f} giây.")
+            print(f"   Thử lại sau {delay:.2f} giây.")
             time.sleep(delay)
-    print("  [THẤT BẠI] Đã thử lại tối đa.")
+    print("   [THẤT BẠI] Đã thử lại tối đa.")
     return None
 
 def fetch_all_pages(session, params):
-    """Lấy dữ liệu từ tất cả các trang của một yêu cầu API."""
+    """Lấy tất cả các trang kết quả từ một API endpoint."""
     all_results = []
     current_page = 1
     while True:
         params['page'] = current_page
         data = make_api_request_with_backoff(session, params)
-        if not data or data.get("code") != 0: break
-        
+        if not data: break
         page_data = data.get("data", {})
         result_list = page_data.get("list", [])
         all_results.extend(result_list)
-        
         page_info = page_data.get("page_info", {})
         total_pages = page_info.get("total_page", 1)
-        print(f"  [PHÂN TRANG] Đã lấy trang {current_page}/{total_pages}...")
-        
         if current_page >= total_pages: break
         current_page += 1
-        time.sleep(1.2)
+        time.sleep(0.5)
     return all_results
 
-def enrich_with_creative_details(product_perf_list, creative_api_results):
-    """Làm giàu dữ liệu sản phẩm bằng cách thêm chi tiết creative."""
-    creative_details_map = {}
-    for creative_result in creative_api_results:
-        dimensions = creative_result.get("dimensions", {})
-        product_id = dimensions.get("item_group_id")
-        if not product_id: continue
-        
-        creative_info = {"item_id": dimensions.get("item_id"), "metrics": creative_result.get("metrics", {})}
-        
-        if product_id not in creative_details_map:
-            creative_details_map[product_id] = []
-        creative_details_map[product_id].append(creative_info)
-
-    for product_perf in product_perf_list:
-        current_product_id = product_perf.get("dimensions", {}).get("item_group_id")
-        enriched_data = creative_details_map.get(current_product_id, [])
-        product_perf["creative_details"] = enriched_data
-        
-    return product_perf_list
-
-def filter_empty_creatives(enriched_campaign_data):
-    """Lọc bỏ các creative không có bất kỳ chỉ số hiệu suất nào."""
-    print("Bắt đầu lọc các creative không có hiệu suất...")
-    ZERO_METRICS = {
-        "cost", "orders", "gross_revenue", "product_clicks", 
-        "product_impressions", "ad_video_view_rate_2s"
+def get_all_campaigns(session, start_date, end_date):
+    """Lấy danh sách tất cả campaign ID và tên trong một khoảng thời gian."""
+    print(f"Bước 1: Đang lấy danh sách Campaigns từ {start_date} đến {end_date}...")
+    params = {
+        "advertiser_id": ADVERTISER_ID, "store_ids": json.dumps([STORE_ID]),
+        "start_date": start_date, "end_date": end_date,
+        "dimensions": json.dumps(["campaign_id"]), "metrics": json.dumps(["campaign_name"]),
+        "filtering": json.dumps({"gmv_max_promotion_types": ["PRODUCT"]}), "page_size": 1000,
     }
-    
-    for campaign in enriched_campaign_data:
-        for product in campaign.get("performance_data", []):
-            if "creative_details" in product:
-                filtered_creatives = []
-                for creative in product["creative_details"]:
-                    metrics = creative.get("metrics", {})
-                    is_all_zero = True
-                    for key, value in metrics.items():
-                        if key in ZERO_METRICS and float(value) != 0:
-                            is_all_zero = False
-                            break
-                    if not is_all_zero:
-                        filtered_creatives.append(creative)
-                product["creative_details"] = filtered_creatives
-    return enriched_campaign_data
+    all_campaign_items = fetch_all_pages(session, params)
+    if all_campaign_items:
+        campaigns = {item["dimensions"]["campaign_id"]: item["metrics"]["campaign_name"] for item in all_campaign_items}
+        print(f"==> Tìm thấy tổng cộng {len(campaigns)} campaigns.")
+        return campaigns
+    return {}
 
-
-def process_campaign_batch(campaign_batch, start_date, end_date):
-    """Xử lý một lô campaigns (ví dụ: 2 campaign một lúc)."""
-    batch_ids = [c[0] for c in campaign_batch]
-    batch_names = [c[1] for c in campaign_batch]
-    print(f"  [BẮT ĐẦU BATCH] Xử lý {len(batch_ids)} campaigns: {', '.join(batch_names)}")
+def fetch_data_for_batch(session, campaign_batch, campaign_name_map, start_date, end_date):
+    """Lấy dữ liệu hiệu suất cho một lô các campaign_id."""
+    batch_ids = [cid for cid in campaign_batch]
     
-    batch_results = {
-        cid: {"campaign_id": cid, "campaign_name": cname, "performance_data": []}
-        for cid, cname in campaign_batch
+    params_perf = {
+        "advertiser_id": ADVERTISER_ID, "store_ids": json.dumps([STORE_ID]),
+        "start_date": start_date, "end_date": end_date,
+        "dimensions": json.dumps(["campaign_id", "item_group_id"]),
+        "metrics": json.dumps(["cost"]),
+        "filtering": json.dumps({"campaign_ids": batch_ids}), 
+        "page_size": 1000,
     }
 
-    with requests.Session() as session:
-        session.headers.update(HEADERS)
-
-        # 1. Lấy tất cả sản phẩm cho cả lô campaign này
-        params_product = {
-            "advertiser_id": ADVERTISER_ID, "store_ids": json.dumps([STORE_ID]),
-            "start_date": start_date, "end_date": end_date,
-            "dimensions": json.dumps(["campaign_id", "item_group_id"]),
-            "metrics": json.dumps(["cost", "orders", "gross_revenue"]),
-            "filtering": json.dumps({"campaign_ids": batch_ids}),
-            "page_size": 1000,
+    perf_list = fetch_all_pages(session, params_perf)
+    
+    results_in_batch = {}
+    for cid in batch_ids:
+        results_in_batch[cid] = {
+            "campaign_id": cid,
+            "campaign_name": campaign_name_map.get(cid, "N/A"),
+            "performance_data": [],
         }
-        product_perf_list = fetch_all_pages(session, params_product)
 
-        if not product_perf_list:
-            print(f"  [KẾT THÚC BATCH] Lô campaigns không có dữ liệu sản phẩm.")
-            return list(batch_results.values())
+    for record in perf_list:
+        cid = record.get("dimensions", {}).get("campaign_id")
+        if cid in results_in_batch:
+            results_in_batch[cid]["performance_data"].append(record)
+            
+    return list(results_in_batch.values())
 
-        # 2. Lấy chi tiết creative cho tất cả sản phẩm trong lô
-        product_ids = list(set([p["dimensions"]["item_group_id"] for p in product_perf_list]))
-        product_id_chunks = list(chunk_list(product_ids, 20)) # Chia lô 20 sản phẩm/lần
-        
-        all_creative_results = []
-        print(f"  Tìm thấy {len(product_ids)} sản phẩm duy nhất, chia thành {len(product_id_chunks)} lô để lấy creative.")
-        for p_chunk in product_id_chunks:
-            params_creative = {
-                "advertiser_id": ADVERTISER_ID, "store_ids": json.dumps([STORE_ID]),
-                "start_date": start_date, "end_date": end_date,
-                "dimensions": json.dumps(["campaign_id", "item_group_id", "item_id"]),
-                "metrics": json.dumps(["cost","orders","cost_per_order","gross_revenue","roi","product_impressions","product_clicks","product_click_rate","ad_conversion_rate","creative_delivery_status","ad_video_view_rate_2s","ad_video_view_rate_6s","ad_video_view_rate_p25","ad_video_view_rate_p50","ad_video_view_rate_p75","ad_video_view_rate_p100"]),
-                "filtering": json.dumps({"campaign_ids": batch_ids, "item_group_ids": p_chunk}),
-                "page_size": 1000,
-            }
-            creative_results = fetch_all_pages(session, params_creative)
-            all_creative_results.extend(creative_results)
-            time.sleep(1.2)
+def fetch_item_details(session, campaign_id, item_group_id, start_date, end_date):
+    """Lấy thông tin chi tiết item cho một cặp (campaign_id, item_group_id)."""
+    params = {
+        "advertiser_id": ADVERTISER_ID,
+        "store_ids": json.dumps([STORE_ID]),
+        "start_date": start_date,
+        "end_date": end_date,
+        "dimensions": json.dumps(["item_id"]),
+        "metrics": json.dumps([
+            "title", "tt_account_name", "tt_account_profile_image_url",
+            "tt_account_authorization_type", "shop_content_type"
+        ]),
+        "filtering": json.dumps({
+            "campaign_ids": [campaign_id],
+            "item_group_ids": [item_group_id]
+        }),
+        "page_size": 1000,
+    }
+    return fetch_all_pages(session, params)
 
-        # 3. Làm giàu và phân loại lại kết quả vào đúng campaign
-        enriched_product_list = enrich_with_creative_details(product_perf_list, all_creative_results)
-        
-        for product_record in enriched_product_list:
-            cid = product_record.get("dimensions", {}).get("campaign_id")
-            if cid in batch_results:
-                batch_results[cid]["performance_data"].append(product_record)
+def enrich_results_with_item_details(session, results, start_date, end_date):
+    """
+    Làm giàu kết quả bằng cách thêm thông tin chi tiết item một cách TUẦN TỰ.
+    """
+    print("\nBước 3: Bắt đầu làm giàu dữ liệu chi tiết Item (quảng cáo)...")
+    
+    tasks = []
+    for campaign_result in results:
+        for perf_record in campaign_result.get("performance_data", []):
+            dims = perf_record.get("dimensions", {})
+            cid = dims.get("campaign_id")
+            item_group_id = dims.get("item_group_id")
+            if cid and item_group_id:
+                tasks.append((perf_record, cid, item_group_id))
 
-    print(f"  [HOÀN THÀNH BATCH] Đã xử lý xong lô: {', '.join(batch_names)}")
-    return list(batch_results.values())
+    if not tasks:
+        print("==> Không có cặp (campaign, item_group) nào để làm giàu dữ liệu.")
+        return results
 
-# --- HÀM CHÍNH ĐỂ CHẠY ---
+    print(f"==> Chuẩn bị gọi API tuần tự cho {len(tasks)} cặp (campaign, item_group)...")
+    
+    # Vòng lặp tuần tự thay cho ThreadPoolExecutor
+    for i, (perf_record, cid, item_group_id) in enumerate(tasks, 1):
+        try:
+            item_details_list = fetch_item_details(session, cid, item_group_id, start_date, end_date)
+            perf_record["item_details"] = item_details_list
+            print(f"   [ENRICH] Đã xử lý {i}/{len(tasks)} cặp...", end='\r')
+        except Exception as e:
+            print(f"\n   [LỖI ENRICH] Lỗi khi xử lý cặp ({cid}, {item_group_id}): {e}")
+            perf_record["item_details"] = [] # Ghi nhận lỗi
+    
+    print(f"\n==> Hoàn thành làm giàu dữ liệu chi tiết item.")
+    return results
+
+# --- LUỒNG CHÍNH ---
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
     date_chunks = generate_monthly_date_chunks(START_DATE, END_DATE)
     print(f"Đã chia khoảng thời gian thành {len(date_chunks)} chunk.")
 
-    all_enriched_results = []
+    all_final_results = []
     
-    for chunk in date_chunks:
-        chunk_start, chunk_end = chunk['start'], chunk['end']
-        print(f"\n--- BẮT ĐẦU XỬ LÝ CHUNK: {chunk_start} to {chunk_end} ---")
-        
-        campaigns_map = {}
-        with requests.Session() as session:
-            session.headers.update(HEADERS)
-            params = {
-                "advertiser_id": ADVERTISER_ID, "store_ids": json.dumps([STORE_ID]),
-                "start_date": chunk_start, "end_date": chunk_end,
-                "dimensions": json.dumps(["campaign_id"]), "metrics": json.dumps(["campaign_name"]),
-                "filtering": json.dumps({"gmv_max_promotion_types": ["PRODUCT"]}), "page_size": 1000,
-            }
-            all_campaign_items = fetch_all_pages(session, params)
-            if all_campaign_items:
-                campaigns_map = {item["dimensions"]["campaign_id"]: item["metrics"]["campaign_name"] for item in all_campaign_items}
-        
-        print(f"==> Tìm thấy {len(campaigns_map)} campaigns trong chunk này.")
-
-        if campaigns_map:
-            campaign_list = list(campaigns_map.items())
-            campaign_batches = list(chunk_list(campaign_list, 5)) # Chia thành các lô 5 campaign
+    with requests.Session() as main_session:
+        main_session.headers.update(HEADERS)
+    
+        for chunk in date_chunks:
+            chunk_start = chunk['start']
+            chunk_end = chunk['end']
+            print(f"\n--- BẮT ĐẦU XỬ LÝ CHUNK: {chunk_start} to {chunk_end} ---")
             
-            max_workers = 1
-            print(f"Bắt đầu xử lý {len(campaign_batches)} lô song song với {max_workers} luồng...")
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_batch = {
-                    executor.submit(process_campaign_batch, batch, chunk_start, chunk_end): batch
-                    for batch in campaign_batches
-                }
+            # Bước 1: Lấy tất cả campaign trong chunk
+            campaigns_map = get_all_campaigns(main_session, chunk_start, chunk_end)
+
+            if campaigns_map:
+                campaign_ids = list(campaigns_map.keys())
+                campaign_batches = list(chunk_list(campaign_ids, 20))
                 
-                for future in as_completed(future_to_batch):
-                    try:
-                        batch_result = future.result()
-                        for campaign_result in batch_result:
-                             if campaign_result and campaign_result.get("performance_data"):
-                                all_enriched_results.append(campaign_result)
-                    except Exception as exc:
-                        print(f"  [LỖI LUỒNG] Lô {future_to_batch[future]} tạo ra lỗi: {exc}")
+                print(f"Bước 2: Lấy dữ liệu hiệu suất cho {len(campaign_ids)} campaigns (chia thành {len(campaign_batches)} lô).")
+                
+                chunk_results = []
+                
+                # Vòng lặp tuần tự thay cho ThreadPoolExecutor
+                for i, batch in enumerate(campaign_batches, 1):
+                    print(f"   Đang xử lý lô {i}/{len(campaign_batches)}...")
+                    batch_result = fetch_data_for_batch(main_session, batch, campaigns_map, chunk_start, chunk_end) 
+                    for result in batch_result:
+                        if result.get("performance_data"):
+                            chunk_results.append(result)
 
-    # Lọc các creative không có hiệu suất
-    final_filtered_results = filter_empty_creatives(all_enriched_results)
+                # Bước 3: Thêm bước làm giàu dữ liệu sau khi có kết quả của chunk
+                if chunk_results:
+                    enriched_chunk_results = enrich_results_with_item_details(main_session, chunk_results, chunk_start, chunk_end)
+                    all_final_results.extend(enriched_chunk_results)
+                else:
+                    print("==> Chunk này không có dữ liệu hiệu suất để xử lý.")
 
-    # Tính tổng cost của các creative CÒN LẠI sau khi lọc
-    total_creative_cost = 0
-    for campaign in final_filtered_results:
-        for product in campaign.get("performance_data", []):
-            for creative in product.get("creative_details", []):
+    # --- TÍNH TOÁN VÀ LƯU FILE ---
+
+    if not all_final_results:
+        print("\n--- KHÔNG CÓ DỮ LIỆU ---")
+        print("Không tìm thấy dữ liệu nào phù hợp với các tiêu chí.")
+    else:
+        total_cost = 0
+        for campaign_result in all_final_results:
+            for perf_record in campaign_result.get("performance_data", []):
                 try:
-                    cost_value = float(creative.get("metrics", {}).get("cost", 0))
-                    total_creative_cost += cost_value
+                    cost_value = float(perf_record.get("metrics", {}).get("cost", 0))
+                    total_cost += cost_value
                 except (ValueError, TypeError):
                     continue
-    
-    # Ghi kết quả cuối cùng đã được lọc ra file
-    output_filename = "tiktok_final_results.json"
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(final_filtered_results, f, ensure_ascii=False, indent=4)
-    
-    print("\n--- HOÀN THÀNH TOÀN BỘ ---")
-    print(f"Đã xử lý và lưu kết quả của {len(final_filtered_results)} campaigns vào file '{output_filename}'")
-    print(f"💰 Tổng chi phí (cost) của các creatives CÓ HIỆU SUẤT: {total_creative_cost:,.0f} VND")
+        
+        print(f"\n💰 Tổng chi phí (cost) của tất cả các campaign đã xử lý: {total_cost:,.0f} VND")
+        print("\n--- HOÀN THÀNH TOÀN BỘ ---")
+        print(f"Đã xử lý và giữ lại kết quả từ {len(all_final_results)} lượt campaign có dữ liệu đầy đủ.")
+        
+        output_filename = "tiktok_results_ENRICHED_SEQUENTIAL.json"
+        with open(output_filename, "w", encoding="utf-8") as f:
+            json.dump(all_final_results, f, ensure_ascii=False, indent=4)
+        print(f"Kết quả đã được ghi vào file '{output_filename}'")
     
     end_time = time.perf_counter()
     print(f"\nTổng thời gian thực thi: {end_time - start_time:.2f} giây.")
