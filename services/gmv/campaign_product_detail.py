@@ -90,10 +90,10 @@ class GMVCampaignProductDetailReporter:
                 
                 print(f"   -> Đã lấy trang {current_page}/{total_pages}. Tổng sản phẩm: {len(all_products)}")
                 current_page += 1
-                time.sleep(0.5) # Thêm độ trễ nhỏ
+                time.sleep(1.5) # Thêm độ trễ nhỏ
             except requests.exceptions.RequestException as e:
                 print(f"   -> Đã xảy ra lỗi khi gọi API: {e}")
-                return None
+                raise Exception(f"Lỗi API: {e} Vui lòng thử lại sau.")
         return all_products
 
     def _get_product_map(self) -> dict | None:
@@ -146,15 +146,16 @@ class GMVCampaignProductDetailReporter:
             cursor = date(next_year, next_month, 1)
         return chunks
     
-    def _make_api_request_with_backoff(self, params, max_retries=5, base_delay=3):
+    def _make_api_request_with_backoff(self, params, max_retries=5, base_delay=3, base_url = PERFORMANCE_API_URL):
         for attempt in range(max_retries):
             try:
-                response = self.session.get(self.PERFORMANCE_API_URL, params=params, timeout=45)
+                response = self.session.get(base_url, params=params, timeout=45)
                 response.raise_for_status()
                 data = response.json()
                 if data.get("code") == 0: return data
                 print(f"   [LỖI API] {data.get('message')}")
-                if "Too many requests" not in data.get("message", ""): return None
+                if ("Too many requests" not in data.get("message", "")) and ("time out" not in data.get("message", "")) and ("You don't have permission to the asset" not in data.get("message", "")): 
+                    raise Exception(f"Lỗi { data.get("message", "")}")
             except requests.exceptions.RequestException as e:
                 print(f"   [LỖI MẠNG] (lần {attempt + 1}): {e}")
             delay = (base_delay ** attempt) + random.uniform(0, 1)
@@ -273,6 +274,7 @@ class GMVCampaignProductDetailReporter:
                         all_campaign_results.extend(future.result())
                     except Exception as e:
                         print(f"Lỗi khi xử lý một lô: {e}")
+                        raise Exception(f"Lỗi: {e}, Vui lòng thử lại sau.")
 
         # BƯỚC 3: Gộp dữ liệu
         final_data = self._enrich_campaign_data(all_campaign_results, product_map)

@@ -21,7 +21,7 @@ def read_root():
     return {"status": "ok", "message": "Welcome to TikTok Reporting API!"}
 
 
-@app.get("/reports/performance-creative", tags=["Reports"])
+@app.get("/reports/performance-creative", tags=["Reports GMV Details"])
 def get_performance_creative_report(
     access_token: str = Query(..., description="Access token của Tiktok"),
     advertiser_id: str = Query(..., description="ID của tài khoản quảng cáo"),
@@ -52,7 +52,7 @@ def get_performance_creative_report(
         raise HTTPException(status_code=500, detail=f"Lỗi máy chủ nội bộ: {str(e)}")
 
 
-@app.get("/reports/campaign-product", tags=["Reports"])
+@app.get("/reports/campaign-product", tags=["Reports GMV Details"])
 def get_campaign_product_report(
     access_token: str = Query(..., description="Access token của Tiktok"),
     advertiser_id: str = Query(..., description="ID của tài khoản quảng cáo"),

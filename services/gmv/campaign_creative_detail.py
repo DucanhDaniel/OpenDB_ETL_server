@@ -80,11 +80,16 @@ class GMVCampaignCreativeDetailReporter:
                 response.raise_for_status()
                 data = response.json()
                 if data.get("code") == 0: return data
+                
                 if "Too many requests" in data.get("message", "") or "Request too frequent" in data.get("message", ""):
                     print(f"  [RATE LIMIT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
+                elif "Internal time out" in data.get("message", ""):
+                        print(f"  [TIME OUT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
                 else:
                     print(f"  [LỖI API] {data.get('message')}")
                     if data.get("code") == 40105: return data 
+                    if ("You don't have permission to the asset" not in data.get("message", "")):
+                        raise Exception(f"[LỖI API] {data.get('message')}")
                     return None
             except requests.exceptions.RequestException as e:
                 print(f"  [LỖI MẠNG] (lần {attempt + 1}/{max_retries}): {e}")
@@ -93,6 +98,7 @@ class GMVCampaignCreativeDetailReporter:
                 print(f"  Thử lại sau {delay:.2f} giây.")
                 time.sleep(delay)
         print("  [THẤT BẠI] Đã thử lại tối đa.")
+        raise Exception("Hết số lần thử dữ liệu, vui lòng thử lại sau.")
         return None
 
     def _fetch_all_pages(self, url: str, params: dict) -> list:
@@ -131,8 +137,10 @@ class GMVCampaignCreativeDetailReporter:
                 return bc_ids
         except requests.exceptions.RequestException as e:
             print(f"Lỗi kết nối khi lấy BC ID: {e}")
+            raise Exception(f"Lỗi kết nối khi lấy BC ID: {e}")
         print("Không thể lấy danh sách BC ID.")
-        return []
+        raise Exception("Không thể lấy danh sách BC ID.")
+        # return []
 
     def _fetch_all_tiktok_products(self, bc_id: str) -> list:
         """Lấy tất cả sản phẩm từ một Business Center ID cụ thể."""
@@ -141,6 +149,27 @@ class GMVCampaignCreativeDetailReporter:
         all_products = self._fetch_all_pages(self.CATALOG_API_URL, params)
         print(f"--- Hoàn tất lấy sản phẩm cho BC ID: {bc_id}. Tổng cộng: {len(all_products)} sản phẩm. ---")
         return all_products
+    
+    def _fetch_creative_metadata(self, campaign_id: str, item_group_id: str, start_date: str, end_date: str) -> list:
+        """Lấy thông tin metadata của creative cho một cặp (campaign_id, item_group_id)."""
+        params = {
+            "advertiser_id": self.advertiser_id,
+            "store_ids": json.dumps([self.store_id]),
+            "start_date": start_date,
+            "end_date": end_date,
+            "dimensions": json.dumps(["item_id"]),
+            "metrics": json.dumps([
+                "title", "tt_account_name", "tt_account_profile_image_url",
+                "tt_account_authorization_type", "shop_content_type"
+            ]),
+            "filtering": json.dumps({
+                "campaign_ids": [campaign_id],
+                "item_group_ids": [item_group_id]
+            }),
+            "page_size": 1000,
+        }
+        # Sử dụng lại phương thức _fetch_all_pages của class
+        return self._fetch_all_pages(self.PERFORMANCE_API_URL, params)
 
     def _get_product_catalog(self) -> list:
         """Lấy danh mục sản phẩm từ BC ID hợp lệ đầu tiên tìm thấy."""
@@ -265,6 +294,45 @@ class GMVCampaignCreativeDetailReporter:
                 
         return product_perf_list
 
+    def _enrich_with_creative_metadata(self, performance_results: list) -> list:
+        """
+        Làm giàu dữ liệu hiệu suất bằng cách thêm metadata cho từng creative.
+        Xử lý gọi API một cách tuần tự.
+        """
+        print("Bắt đầu làm giàu dữ liệu với metadata của creative (tuần tự)...")
+        
+        # Tạo danh sách các cặp (campaign, product) cần lấy metadata
+        tasks = []
+        for campaign in performance_results:
+            start_date = campaign.get("start_date")
+            end_date = campaign.get("end_date")
+            for product_perf in campaign.get("performance_data", []):
+                item_group_id = product_perf.get("dimensions", {}).get("item_group_id")
+                campaign_id = product_perf.get("dimensions", {}).get("campaign_id")
+                # Chỉ thêm vào danh sách nếu có creative cần làm giàu
+                if campaign_id and item_group_id and product_perf.get("creative_details"):
+                    tasks.append((product_perf, campaign_id, item_group_id, start_date, end_date))
+
+        # Xử lý tuần tự
+        for i, (product_perf, cid, igid, s_date, e_date) in enumerate(tasks, 1):
+            print(f"   Đang lấy metadata cho cặp ({cid}, {igid}) - {i}/{len(tasks)}...", end='\r')
+            metadata_list = self._fetch_creative_metadata(cid, igid, s_date, e_date)
+            
+            # Tạo map để tra cứu nhanh metadata theo item_id
+            metadata_map = {
+                item.get("dimensions", {}).get("item_id"): item.get("metrics", {})
+                for item in metadata_list
+            }
+            
+            # Gắn metadata vào từng creative
+            for creative in product_perf.get("creative_details", []):
+                item_id = creative.get("item_id")
+                if item_id in metadata_map:
+                    creative["metadata"] = metadata_map[item_id]
+        
+        print(f"\nHoàn thành làm giàu metadata cho {len(tasks)} cặp sản phẩm.")
+        return performance_results
+
     @staticmethod
     def _filter_empty_creatives(enriched_campaign_data: list) -> list:
         """Lọc bỏ các creative không có bất kỳ chỉ số hiệu suất nào."""
@@ -332,6 +400,7 @@ class GMVCampaignCreativeDetailReporter:
                         all_performance_results.extend([res for res in batch_result if res.get("performance_data")])
                     except Exception as exc:
                         print(f"  [LỖI LUỒNG] Lô {future_to_batch[future]} tạo ra lỗi: {exc}")
+                        raise Exception(f"  [LỖI LUỒNG] Lô {future_to_batch[future]} tạo ra lỗi: {exc}")
 
         print("\n--- HOÀN TẤT GIAI ĐOẠN 1: ĐÃ LẤY XONG DỮ LIỆU HIỆU SUẤT ---")
         
@@ -345,6 +414,7 @@ class GMVCampaignCreativeDetailReporter:
         print("\n--- GIAI ĐOẠN 3: BẮT ĐẦU LÀM GIÀU DỮ LIỆU ---")
         product_info_map = self._create_product_info_map(product_catalog)
         final_data = self._enrich_with_product_details(all_performance_results, product_info_map)
+        final_data = self._enrich_with_creative_metadata(final_data)
         final_filtered_data = self._filter_empty_creatives(final_data)
 
         return final_filtered_data
@@ -356,7 +426,7 @@ if __name__ == "__main__":
     ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
     ADVERTISER_ID = "6967547145545105410"
     STORE_ID = "7494600253418473607"      
-    START_DATE = "2025-09-01"
+    START_DATE = "2025-06-01"
     END_DATE = "2025-09-18"
 
     if not ACCESS_TOKEN:
@@ -401,6 +471,7 @@ if __name__ == "__main__":
             print(f"Lỗi khởi tạo: {ve}")
         except Exception as e:
             print(f"Một lỗi không mong muốn đã xảy ra: {e}")
+            raise Exception(f"{e}")
 
         end_time = time.perf_counter()
         print(f"\nTổng thời gian thực thi: {end_time - start_time:.2f} giây.")
