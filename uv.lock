@@ -208,6 +208,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyngrok"
+version = "7.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a3/40/f06cbabac68bf2ff33b499d32373dedc20ebec3da814c26f82281f3c9bec/pyngrok-7.4.0.tar.gz", hash = "sha256:1f786fed8d156b99bffd713096a7ec8c81181f949c8f5c920f6820e92d6b9876", size = 44530, upload-time = "2025-09-23T14:47:42.642Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e6/60/00c4570b6de596a87bd05cb828eaf507e6b9ce171ad797e90fe5e8ecbd6e/pyngrok-7.4.0-py3-none-any.whl", hash = "sha256:719ee7bda031c7c3c80e7722aa3103961ac58bfae2167881d57fef28f5c8917a", size = 25434, upload-time = "2025-09-23T14:47:41.229Z" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -286,6 +298,7 @@ dependencies = [
     { name = "dotenv" },
     { name = "fastapi" },
     { name = "gunicorn" },
+    { name = "pyngrok" },
     { name = "python-json-logger" },
     { name = "requests" },
     { name = "uvicorn", extra = ["standard"] },
@@ -296,6 +309,7 @@ requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "fastapi", specifier = ">=0.116.2" },
     { name = "gunicorn", specifier = ">=23.0.0" },
+    { name = "pyngrok", specifier = ">=7.4.0" },
     { name = "python-json-logger", specifier = ">=3.3.0" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.36.0" },

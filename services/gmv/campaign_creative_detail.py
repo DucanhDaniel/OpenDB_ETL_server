@@ -44,6 +44,11 @@ class GMVCampaignCreativeDetailReporter:
             "Access-Token": self.access_token,
             "Content-Type": "application/json",
         })
+        
+        self.throttling_delay = 0.0
+        self.recovery_factor = 0.8
+        
+        self.is_fetching_creative = False
 
     @staticmethod
     def _chunk_list(data: list, size: int):
@@ -72,14 +77,24 @@ class GMVCampaignCreativeDetailReporter:
             cursor_date = date(next_year, next_month, 1)
         return chunks
 
-    def _make_api_request_with_backoff(self, url: str, params: dict, max_retries: int = 5, base_delay: int = 3) -> dict | None:
+    def _make_api_request_with_backoff(self, url: str, params: dict, max_retries: int = 6, base_delay: int = 3) -> dict | None:
         """Thực hiện gọi API với cơ chế thử lại (exponential backoff)."""
+        if self.is_fetching_creative:
+            self.throttling_delay = max(self.throttling_delay, 0.15)
+        if self.throttling_delay > 0:
+            print(f"  [THROTTLING] Áp dụng delay hãm tốc {self.throttling_delay:.2f} giây.")
+            time.sleep(self.throttling_delay)
+        
         for attempt in range(max_retries):
             try:
                 response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
                 data = response.json()
-                if data.get("code") == 0: return data
+                if data.get("code") == 0: 
+                    self.throttling_delay *= self.recovery_factor
+                    if self.throttling_delay < 0.1:
+                        self.throttling_delay = 0
+                    return data
                 
                 if "Too many requests" in data.get("message", "") or "Request too frequent" in data.get("message", ""):
                     print(f"  [RATE LIMIT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
@@ -94,7 +109,8 @@ class GMVCampaignCreativeDetailReporter:
             except requests.exceptions.RequestException as e:
                 print(f"  [LỖI MẠNG] (lần {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
-                delay = (base_delay ** attempt) + random.uniform(0, 1)
+                delay = (base_delay ** (attempt + 1)) + random.uniform(0, 1)
+                self.throttling_delay = delay
                 print(f"  Thử lại sau {delay:.2f} giây.")
                 time.sleep(delay)
         print("  [THẤT BẠI] Đã thử lại tối đa.")
@@ -168,6 +184,7 @@ class GMVCampaignCreativeDetailReporter:
             }),
             "page_size": 1000,
         }
+        
         # Sử dụng lại phương thức _fetch_all_pages của class
         return self._fetch_all_pages(self.PERFORMANCE_API_URL, params)
 
@@ -314,6 +331,7 @@ class GMVCampaignCreativeDetailReporter:
                     tasks.append((product_perf, campaign_id, item_group_id, start_date, end_date))
 
         # Xử lý tuần tự
+        self.is_fetching_creative = True
         for i, (product_perf, cid, igid, s_date, e_date) in enumerate(tasks, 1):
             print(f"   Đang lấy metadata cho cặp ({cid}, {igid}) - {i}/{len(tasks)}...", end='\r')
             metadata_list = self._fetch_creative_metadata(cid, igid, s_date, e_date)
@@ -329,7 +347,7 @@ class GMVCampaignCreativeDetailReporter:
                 item_id = creative.get("item_id")
                 if item_id in metadata_map:
                     creative["metadata"] = metadata_map[item_id]
-        
+        self.is_fetching_creative = False
         print(f"\nHoàn thành làm giàu metadata cho {len(tasks)} cặp sản phẩm.")
         return performance_results
 
@@ -337,7 +355,8 @@ class GMVCampaignCreativeDetailReporter:
     def _filter_empty_creatives(enriched_campaign_data: list) -> list:
         """Lọc bỏ các creative không có bất kỳ chỉ số hiệu suất nào."""
         print("Bắt đầu lọc các creative không có hiệu suất...")
-        ZERO_METRICS = {"cost", "orders", "gross_revenue", "product_clicks", "product_impressions", "ad_video_view_rate_2s"}
+        # ZERO_METRICS = {"cost", "orders", "gross_revenue", "product_clicks", "product_impressions", "ad_video_view_rate_2s"}
+        ZERO_METRICS = {"cost", "orders"}
         for campaign in enriched_campaign_data:
             for product in campaign.get("performance_data", []):
                 if "creative_details" in product:
@@ -414,8 +433,9 @@ class GMVCampaignCreativeDetailReporter:
         print("\n--- GIAI ĐOẠN 3: BẮT ĐẦU LÀM GIÀU DỮ LIỆU ---")
         product_info_map = self._create_product_info_map(product_catalog)
         final_data = self._enrich_with_product_details(all_performance_results, product_info_map)
-        final_data = self._enrich_with_creative_metadata(final_data)
         final_filtered_data = self._filter_empty_creatives(final_data)
+        final_filtered_data = self._enrich_with_creative_metadata(final_filtered_data)
+        
 
         return final_filtered_data
 
@@ -423,10 +443,10 @@ class GMVCampaignCreativeDetailReporter:
 if __name__ == "__main__":
     # --- CẤU HÌNH ---
     # Lấy thông tin từ file .env
-    ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
-    ADVERTISER_ID = "6967547145545105410"
-    STORE_ID = "7494600253418473607"      
-    START_DATE = "2025-06-01"
+    ACCESS_TOKEN = "5f6e448f4574b0cef046b23a6bebb79883757750"
+    ADVERTISER_ID = "7254031264410288129"
+    STORE_ID = "7494888844653660383"      
+    START_DATE = "2025-01-01"
     END_DATE = "2025-09-18"
 
     if not ACCESS_TOKEN:

@@ -1,0 +1,33 @@
+# Bỏ qua các thư mục và file cấu hình của môi trường ảo
+venv
+.env
+.venv
+
+# Bỏ qua các thư mục cache của Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Bỏ qua các thư mục quản lý dự án, IDE
+.git
+.gitignore
+.vscode
+.idea
+*.log
+
+# Bỏ qua thư mục build, phân phối
+dist
+build
+*.egg-info/
+
+experiment.py
+
+tiktok/
+
+.env
+
+*.json
+
+README.md
+
