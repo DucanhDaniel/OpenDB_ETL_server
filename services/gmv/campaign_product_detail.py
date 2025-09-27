@@ -230,7 +230,9 @@ class GMVCampaignProductDetailReporter:
             results[cid] = {
                 "campaign_id": cid, "campaign_name": info.get("campaign_name"),
                 "operation_status": info.get("operation_status"), "bid_type": info.get("bid_type"),
-                "performance_data": []
+                "performance_data": [],
+                "start_date": start_date, 
+                "end_date": end_date
             }
         
         for record in perf_list:
@@ -241,38 +243,92 @@ class GMVCampaignProductDetailReporter:
 
     # --- PHẦN 3: PHƯƠNG THỨC CHÍNH VÀ GỘP DỮ LIỆU ---
 
+    # def _enrich_campaign_data(self, campaign_results, product_map):
+    #     print("\n--- BƯỚC 3: GỘP DỮ LIỆU SẢN PHẨM VÀO CAMPAIGN ---")
+    #     if not product_map:
+    #         print("   -> Cảnh báo: Không có bản đồ sản phẩm. Dữ liệu sẽ không được làm giàu.")
+    #         return campaign_results
+            
+    #     enriched_results = []
+    #     unique_campaigns = {}
+
+    #     for campaign in campaign_results:
+    #         campaign_id = campaign.get("campaign_id")
+    #         if not campaign_id: continue
+
+    #         # Gộp các record của cùng một campaign lại
+    #         if campaign_id not in unique_campaigns:
+    #             unique_campaigns[campaign_id] = campaign
+    #         else:
+    #             unique_campaigns[campaign_id]["performance_data"].extend(campaign.get("performance_data", []))
+
+    #     for campaign in unique_campaigns.values():
+    #         if not campaign.get("performance_data"):
+    #             continue
+            
+    #         for perf_record in campaign["performance_data"]:
+    #             item_id = perf_record.get("dimensions", {}).get("item_group_id")
+    #             if item_id:
+    #                 perf_record["product_info"] = product_map.get(item_id, {"title": f"Không tìm thấy thông tin cho ID {item_id}"})
+    #         enriched_results.append(campaign)
+            
+    #     print("   -> Đã gộp dữ liệu thành công.")
+    #     return enriched_results
+
+# --- PHẦN 3: PHƯƠNG THỨC CHÍNH VÀ GỘP DỮ LIỆU ---
+
     def _enrich_campaign_data(self, campaign_results, product_map):
-        print("\n--- BƯỚC 3: GỘP DỮ LIỆU SẢN PHẨM VÀO CAMPAIGN ---")
+        """
+        Làm phẳng và gộp dữ liệu. Mỗi bản ghi hiệu suất sẽ là một mục riêng biệt
+        chứa đầy đủ thông tin campaign và sản phẩm.
+        """
+        print("\n--- BƯỚC 3: LÀM PHẲNG VÀ GỘP DỮ LIỆU ---")
         if not product_map:
             print("   -> Cảnh báo: Không có bản đồ sản phẩm. Dữ liệu sẽ không được làm giàu.")
+            # Vẫn trả về dữ liệu thô nếu không có product_map
             return campaign_results
             
-        enriched_results = []
-        unique_campaigns = {}
+        flattened_records = []
 
-        for campaign in campaign_results:
-            campaign_id = campaign.get("campaign_id")
-            if not campaign_id: continue
+        # Lặp qua từng kết quả campaign từ mỗi chunk thời gian
+        for campaign_chunk in campaign_results:
+            # Lấy thông tin chung của campaign từ chunk này
+            # Quan trọng: start_date và end_date ở đây là của chunk hiện tại
+            campaign_info = {
+                "campaign_id": campaign_chunk.get("campaign_id"),
+                "campaign_name": campaign_chunk.get("campaign_name"),
+                "operation_status": campaign_chunk.get("operation_status"),
+                "bid_type": campaign_chunk.get("bid_type"),
+                "start_date": campaign_chunk.get("start_date"),
+                "end_date": campaign_chunk.get("end_date")
+            }
 
-            # Gộp các record của cùng một campaign lại
-            if campaign_id not in unique_campaigns:
-                unique_campaigns[campaign_id] = campaign
-            else:
-                unique_campaigns[campaign_id]["performance_data"].extend(campaign.get("performance_data", []))
-
-        for campaign in unique_campaigns.values():
-            if not campaign.get("performance_data"):
+            # Nếu không có dữ liệu hiệu suất, bỏ qua
+            if not campaign_chunk.get("performance_data"):
                 continue
-            
-            for perf_record in campaign["performance_data"]:
-                item_id = perf_record.get("dimensions", {}).get("item_group_id")
-                if item_id:
-                    perf_record["product_info"] = product_map.get(item_id, {"title": f"Không tìm thấy thông tin cho ID {item_id}"})
-            enriched_results.append(campaign)
-            
-        print("   -> Đã gộp dữ liệu thành công.")
-        return enriched_results
 
+            # Lặp qua từng bản ghi hiệu suất trong chunk
+            for perf_record in campaign_chunk["performance_data"]:
+                item_group_id = perf_record.get("dimensions", {}).get("item_group_id")
+                
+                # Lấy thông tin sản phẩm tương ứng
+                product_info = {}
+                if item_group_id:
+                    product_info = product_map.get(item_group_id, {"title": f"Không tìm thấy thông tin cho ID {item_group_id}"})
+
+                # Tạo một bản ghi phẳng cuối cùng
+                final_record = {
+                    **campaign_info,  # Thông tin campaign (có start/end date đúng)
+                    "stat_time_day": perf_record.get("dimensions", {}).get("stat_time_day"),
+                    "item_group_id": item_group_id,
+                    "metrics": perf_record.get("metrics", {}),
+                    "product_info": product_info
+                }
+                flattened_records.append(final_record)
+                
+        print(f"   -> Đã làm phẳng và gộp thành công {len(flattened_records)} bản ghi chi tiết.")
+        return flattened_records
+    
     def get_data(self, start_date: str, end_date: str) -> list:
         """
         Hàm chính để chạy toàn bộ quy trình: lấy sản phẩm, lấy hiệu suất
@@ -321,7 +377,7 @@ if __name__ == "__main__":
     ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
     ADVERTISER_ID = "7137968211592495105"
     STORE_ID = "7494588040522401840"
-    START_DATE = "2025-06-01"
+    START_DATE = "2025-08-01"
     END_DATE = "2025-09-18"
 
     start_time = time.perf_counter()
@@ -344,9 +400,9 @@ if __name__ == "__main__":
                 print(f"   -> Đã lưu kết quả vào file '{output_filename}'")
                 
                 total_cost = sum(
-                    float(perf.get("metrics", {}).get("cost", 0))
+                    float(campaign.get("metrics", {}).get("cost", 0))
                     for campaign in enriched_results
-                    for perf in campaign.get("performance_data", [])
+                    # for perf in campaign.get("performance_data", [])
                 )
                 print(f"\n💰 Tổng chi phí của tất cả campaign: {total_cost:,.0f} VND")
             else:

@@ -230,7 +230,9 @@ class GMVCampaignProductDetailReporter:
             results[cid] = {
                 "campaign_id": cid, "campaign_name": info.get("campaign_name"),
                 "operation_status": info.get("operation_status"), "bid_type": info.get("bid_type"),
-                "performance_data": []
+                "performance_data": [],
+                "start_date": start_date, 
+                "end_date": end_date
             }
         
         for record in perf_list:
