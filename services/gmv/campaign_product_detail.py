@@ -15,6 +15,8 @@ class GMVCampaignProductDetailReporter:
     """
     Lấy và kết hợp dữ liệu hiệu suất chiến dịch với thông tin chi tiết sản phẩm
     từ TikTok Marketing API.
+    
+    Đã được nâng cấp với cơ chế backoff và throttling để tăng độ ổn định.
     """
     # --- CÁC HẰNG SỐ API ---
     BC_API_URL = "https://business-api.tiktok.com/open_api/v1.3/bc/get/"
@@ -43,84 +45,75 @@ class GMVCampaignProductDetailReporter:
             "Content-Type": "application/json",
         })
 
-    # --- PHẦN 1: CÁC PHƯƠNG THỨC LẤY DỮ LIỆU SẢN PHẨM ---
+        # Thuộc tính cho cơ chế throttling và backoff
+        self.throttling_delay = 0.0
+        self.recovery_factor = 0.8 # Giảm delay đi 20% sau mỗi lần thành công
 
-    def _get_bc_ids(self) -> list[str]:
-        """Lấy danh sách BC ID."""
-        print(">> Bước 1A: Đang lấy danh sách BC ID...")
-        headers = {'Access-Token': self.access_token}
-        try:
-            response = requests.get(self.BC_API_URL, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            if data.get("code") == 0:
-                bc_list = data.get("data", {}).get("list", [])
-                bc_ids = [bc["bc_info"]["bc_id"] for bc in bc_list if bc.get("bc_info")]
-                print(f"   -> Đã lấy thành công {len(bc_ids)} BC ID.")
-                return bc_ids
-            else:
-                print(f"   -> Lỗi API khi lấy BC ID: {data.get('message')}")
-        except requests.exceptions.RequestException as e:
-            print(f"   -> Lỗi kết nối khi lấy BC ID: {e}")
-        return []
+    # --- PHẦN 1: CÁC PHƯƠNG THỨC TIỆN ÍCH VÀ GỌI API CỐT LÕI ---
 
-    def _fetch_products_from_bc_id(self, bc_id: str) -> list | None:
-        """Lấy tất cả sản phẩm cho một bc_id cụ thể."""
-        all_products = []
-        current_page = 1
-        total_pages = 1
-        print(f">> Bước 1B: Thử lấy sản phẩm với BC ID: {bc_id}...")
+    def _make_api_request_with_backoff(self, url: str, params: dict, max_retries: int = 6, base_delay: int = 3) -> dict | None:
+        """Thực hiện gọi API với cơ chế thử lại (exponential backoff) và throttling."""
+        if self.throttling_delay > 0:
+            print(f"  [THROTTLING] Áp dụng delay hãm tốc {self.throttling_delay:.2f} giây.")
+            time.sleep(self.throttling_delay)
         
-        while current_page <= total_pages:
-            params = {'bc_id': bc_id, 'store_id': self.store_id, 'page': current_page, 'page_size': 100}
+        for attempt in range(max_retries):
             try:
-                response = self.session.get(self.PRODUCT_API_URL, params=params)
+                response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
                 data = response.json()
-                if data.get("code") != 0:
-                    print(f"   -> Lỗi: {data.get('message')}. BC ID này không có quyền.")
-                    return None  # BC ID không hợp lệ
                 
-                api_data = data.get("data", {})
-                products = api_data.get("store_products", [])
-                all_products.extend(products)
-
-                if current_page == 1:
-                    total_pages = api_data.get("page_info", {}).get("total_page", 1)
+                if data.get("code") == 0: 
+                    # Giảm dần delay nếu yêu cầu thành công
+                    self.throttling_delay *= self.recovery_factor
+                    if self.throttling_delay < 0.1: self.throttling_delay = 0
+                    return data
                 
-                print(f"   -> Đã lấy trang {current_page}/{total_pages}. Tổng sản phẩm: {len(all_products)}")
-                current_page += 1
-                time.sleep(1.5) # Thêm độ trễ nhỏ
+                # Xử lý các lỗi cụ thể từ API
+                error_message = data.get("message", "")
+                if "Too many requests" in error_message or "Request too frequent" in error_message:
+                    print(f"  [RATE LIMIT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
+                elif "Internal time out" in error_message:
+                    print(f"  [TIME OUT] Gặp lỗi (lần {attempt + 1}/{max_retries})...")
+                else:
+                    print(f"  [LỖI API] {error_message}")
+                    # Không thử lại với các lỗi không thể phục hồi
+                    if ("permission" not in error_message):
+                        raise Exception(f"[LỖI API KHÔNG THỂ PHỤC HỒI] {error_message}")
+                    return None # Trả về None cho lỗi quyền truy cập
+            
             except requests.exceptions.RequestException as e:
-                print(f"   -> Đã xảy ra lỗi khi gọi API: {e}")
-                raise Exception(f"Lỗi API: {e} Vui lòng thử lại sau.")
-        return all_products
+                print(f"  [LỖI MẠNG] (lần {attempt + 1}/{max_retries}): {e}")
+            
+            if attempt < max_retries - 1:
+                delay = (base_delay ** (attempt + 1)) + random.uniform(0, 1)
+                self.throttling_delay = delay  # Kích hoạt throttling
+                print(f"  Thử lại sau {delay:.2f} giây.")
+                time.sleep(delay)
 
-    def _get_product_map(self) -> dict | None:
-        """Lấy toàn bộ sản phẩm và chuyển thành một dictionary để tra cứu nhanh."""
-        print("\n--- BƯỚC 1: LẤY VÀ CHUẨN BỊ DỮ LIỆU SẢN PHẨM ---")
-        bc_ids = self._get_bc_ids()
-        if not bc_ids:
-            return None
+        print("  [THẤT BẠI] Đã thử lại tối đa.")
+        raise Exception("Hết số lần thử, vui lòng kiểm tra kết nối hoặc trạng thái API và thử lại sau.")
 
-        all_products = []
-        for bc_id in bc_ids:
-            products_list = self._fetch_products_from_bc_id(bc_id)
-            if products_list is not None:
-                print(f"   => THÀNH CÔNG! Tìm thấy BC ID hợp lệ: {bc_id}. Đã lấy {len(products_list)} sản phẩm.")
-                all_products = products_list
-                break
-        
-        if not all_products:
-            print("   -> Không tìm thấy BC ID nào có thể truy cập sản phẩm của store này.")
-            return None
-
-        print("\n>> Bước 1C: Tạo bản đồ sản phẩm để tra cứu nhanh...")
-        product_map = {p['item_group_id']: p for p in all_products}
-        print(f"   -> Đã tạo bản đồ cho {len(product_map)} sản phẩm độc nhất.")
-        return product_map
-
-    # --- PHẦN 2: CÁC PHƯƠNG THỨC LẤY DỮ LIỆU CAMPAIGN ---
+    def _fetch_all_pages(self, url: str, params: dict) -> list:
+        """Lấy dữ liệu từ tất cả các trang của một endpoint API."""
+        all_results, current_page = [], 1
+        while True:
+            params['page'] = current_page
+            data = self._make_api_request_with_backoff(url, params)
+            if not data or data.get("code") != 0: break
+            
+            page_data = data.get("data", {})
+            # Linh hoạt lấy list kết quả từ các key khác nhau
+            result_list = page_data.get("list", []) or page_data.get("store_products", [])
+            all_results.extend(result_list)
+            
+            total_pages = page_data.get("page_info", {}).get("total_page", 1)
+            print(f"  [PHÂN TRANG] Đã lấy trang {current_page}/{total_pages}...")
+            
+            if current_page >= total_pages: break
+            current_page += 1
+            time.sleep(1.2) # Delay nhỏ giữa các trang để tránh bị block
+        return all_results
 
     @staticmethod
     def _chunk_list(data, size):
@@ -145,37 +138,68 @@ class GMVCampaignProductDetailReporter:
             if next_month > 12: next_month, next_year = 1, next_year + 1
             cursor = date(next_year, next_month, 1)
         return chunks
-    
-    def _make_api_request_with_backoff(self, params, max_retries=5, base_delay=3, base_url = PERFORMANCE_API_URL):
-        for attempt in range(max_retries):
-            try:
-                response = self.session.get(base_url, params=params, timeout=45)
-                response.raise_for_status()
-                data = response.json()
-                if data.get("code") == 0: return data
-                print(f"   [LỖI API] {data.get('message')}")
-                if ("Too many requests" not in data.get("message", "")) and ("time out" not in data.get("message", "")) and ("You don't have permission to the asset" not in data.get("message", "")): 
-                    raise Exception(f"Lỗi { data.get("message", "")}")
-            except requests.exceptions.RequestException as e:
-                print(f"   [LỖI MẠNG] (lần {attempt + 1}): {e}")
-            delay = (base_delay ** attempt) + random.uniform(0, 1)
-            time.sleep(delay)
-        return None
+        
+    # --- PHẦN 2: CÁC PHƯƠNG THỨC LẤY DỮ LIỆU CỤ THỂ ---
 
-    def _fetch_all_pages(self, params):
-        all_results, page = [], 1
-        while True:
-            params['page'] = page
-            data = self._make_api_request_with_backoff(params)
-            if not data: break
-            page_data = data.get("data", {})
-            all_results.extend(page_data.get("list", []))
-            total_pages = page_data.get("page_info", {}).get("total_page", 1)
-            if page >= total_pages: break
-            page += 1
-        return all_results
+    def _get_bc_ids(self) -> list[str]:
+        """Lấy danh sách BC ID."""
+        print(">> Bước 1A: Đang lấy danh sách BC ID...")
+        data = self._make_api_request_with_backoff(self.BC_API_URL, params={})
+        if data and data.get("code") == 0:
+            bc_list = data.get("data", {}).get("list", [])
+            bc_ids = [bc["bc_info"]["bc_id"] for bc in bc_list if bc.get("bc_info")]
+            print(f"   -> Đã lấy thành công {len(bc_ids)} BC ID.")
+            return bc_ids
+        print("   -> Lỗi hoặc không lấy được BC ID.")
+        return []
+
+    def _fetch_products_from_bc_id(self, bc_id: str) -> list | None:
+        """Lấy tất cả sản phẩm cho một bc_id cụ thể bằng cách sử dụng _fetch_all_pages."""
+        print(f">> Bước 1B: Thử lấy sản phẩm với BC ID: {bc_id}...")
+        params = {'bc_id': bc_id, 'store_id': self.store_id, 'page_size': 100}
+        
+        # Thử gọi trang đầu tiên để kiểm tra quyền
+        first_page_data = self._make_api_request_with_backoff(self.PRODUCT_API_URL, {**params, 'page': 1})
+        
+        # SỬA LỖI TẠI ĐÂY: Xử lý trường hợp `first_page_data` có thể là `None`
+        if not first_page_data or first_page_data.get("code") != 0:
+            error_msg = "Không có quyền hoặc không nhận được phản hồi hợp lệ"
+            if first_page_data:
+                error_msg = first_page_data.get('message', error_msg)
+            
+            print(f"   -> Lỗi: {error_msg}. BC ID này không hợp lệ.")
+            return None
+        
+        # Nếu trang đầu tiên OK, tiếp tục lấy tất cả các trang
+        print("   -> Quyền hợp lệ. Bắt đầu lấy tất cả sản phẩm...")
+        return self._fetch_all_pages(self.PRODUCT_API_URL, params)
     
+    def _get_product_map(self) -> dict | None:
+        """Lấy toàn bộ sản phẩm và chuyển thành một dictionary để tra cứu nhanh."""
+        print("\n--- BƯỚC 1: LẤY VÀ CHUẨN BỊ DỮ LIỆU SẢN PHẨM ---")
+        bc_ids = self._get_bc_ids()
+        if not bc_ids:
+            return None
+
+        all_products = []
+        for bc_id in bc_ids:
+            products_list = self._fetch_products_from_bc_id(bc_id)
+            if products_list is not None:
+                print(f"   => THÀNH CÔNG! Tìm thấy BC ID hợp lệ: {bc_id}. Đã lấy {len(products_list)} sản phẩm.")
+                all_products = products_list
+                break 
+        
+        if not all_products:
+            print("   -> Không tìm thấy BC ID nào có thể truy cập sản phẩm của store này.")
+            return None
+
+        print("\n>> Bước 1C: Tạo bản đồ sản phẩm để tra cứu nhanh...")
+        product_map = {p['item_group_id']: p for p in all_products}
+        print(f"   -> Đã tạo bản đồ cho {len(product_map)} sản phẩm độc nhất.")
+        return product_map
+
     def _get_all_campaigns(self, start_date, end_date):
+        """Lấy tất cả campaign trong một khoảng thời gian."""
         params = {
             "advertiser_id": self.advertiser_id, "store_ids": json.dumps([self.store_id]),
             "start_date": start_date, "end_date": end_date,
@@ -183,13 +207,14 @@ class GMVCampaignProductDetailReporter:
             "metrics": json.dumps(["campaign_name", "operation_status", "bid_type"]),
             "filtering": json.dumps({"gmv_max_promotion_types": ["PRODUCT"]}), "page_size": 1000,
         }
-        items = self._fetch_all_pages(params)
+        items = self._fetch_all_pages(self.PERFORMANCE_API_URL, params)
         return {
             item["dimensions"]["campaign_id"]: item["metrics"]
             for item in items
         }
 
     def _fetch_data_for_batch(self, campaign_batch, start_date, end_date):
+        """Lấy dữ liệu hiệu suất chi tiết cho một lô campaign."""
         batch_ids = list(campaign_batch.keys())
         params = {
             "advertiser_id": self.advertiser_id, "store_ids": json.dumps([self.store_id]),
@@ -198,7 +223,7 @@ class GMVCampaignProductDetailReporter:
             "metrics": json.dumps(["orders", "gross_revenue", "cost", "cost_per_order", "roi"]),
             "filtering": json.dumps({"campaign_ids": batch_ids}), "page_size": 1000,
         }
-        perf_list = self._fetch_all_pages(params)
+        perf_list = self._fetch_all_pages(self.PERFORMANCE_API_URL, params)
         
         results = {}
         for cid, info in campaign_batch.items():
@@ -218,16 +243,33 @@ class GMVCampaignProductDetailReporter:
 
     def _enrich_campaign_data(self, campaign_results, product_map):
         print("\n--- BƯỚC 3: GỘP DỮ LIỆU SẢN PHẨM VÀO CAMPAIGN ---")
+        if not product_map:
+            print("   -> Cảnh báo: Không có bản đồ sản phẩm. Dữ liệu sẽ không được làm giàu.")
+            return campaign_results
+            
         enriched_results = []
+        unique_campaigns = {}
+
         for campaign in campaign_results:
+            campaign_id = campaign.get("campaign_id")
+            if not campaign_id: continue
+
+            # Gộp các record của cùng một campaign lại
+            if campaign_id not in unique_campaigns:
+                unique_campaigns[campaign_id] = campaign
+            else:
+                unique_campaigns[campaign_id]["performance_data"].extend(campaign.get("performance_data", []))
+
+        for campaign in unique_campaigns.values():
             if not campaign.get("performance_data"):
                 continue
             
             for perf_record in campaign["performance_data"]:
                 item_id = perf_record.get("dimensions", {}).get("item_group_id")
                 if item_id:
-                    perf_record["product_info"] = product_map.get(item_id, {"title": "Không tìm thấy thông tin"})
+                    perf_record["product_info"] = product_map.get(item_id, {"title": f"Không tìm thấy thông tin cho ID {item_id}"})
             enriched_results.append(campaign)
+            
         print("   -> Đã gộp dữ liệu thành công.")
         return enriched_results
 
@@ -235,13 +277,6 @@ class GMVCampaignProductDetailReporter:
         """
         Hàm chính để chạy toàn bộ quy trình: lấy sản phẩm, lấy hiệu suất
         chiến dịch, và gộp chúng lại.
-
-        Args:
-            start_date (str): Ngày bắt đầu (YYYY-MM-DD).
-            end_date (str): Ngày kết thúc (YYYY-MM-DD).
-
-        Returns:
-            list: Danh sách dữ liệu chiến dịch đã được làm giàu thông tin sản phẩm.
         """
         # BƯỚC 1: Lấy dữ liệu sản phẩm
         product_map = self._get_product_map()
@@ -264,7 +299,7 @@ class GMVCampaignProductDetailReporter:
             print(f"   -> Tìm thấy {len(campaigns)} campaigns. Chia thành lô để xử lý...")
             batches = list(self._chunk_list(list(campaigns.items()), 20))
             
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=1) as executor:
                 future_to_batch = {
                     executor.submit(self._fetch_data_for_batch, dict(batch), chunk['start'], chunk['end']): batch
                     for batch in batches
@@ -274,17 +309,18 @@ class GMVCampaignProductDetailReporter:
                         all_campaign_results.extend(future.result())
                     except Exception as e:
                         print(f"Lỗi khi xử lý một lô: {e}")
-                        raise Exception(f"Lỗi: {e}, Vui lòng thử lại sau.")
+                        raise
 
         # BƯỚC 3: Gộp dữ liệu
         final_data = self._enrich_campaign_data(all_campaign_results, product_map)
         return final_data
 
+# --- HÀM CHÍNH ĐỂ CHẠY ---
 if __name__ == "__main__":
     # --- CẤU HÌNH ---
     ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
-    ADVERTISER_ID = "6967547145545105410"
-    STORE_ID = "7494600253418473607"
+    ADVERTISER_ID = "7137968211592495105"
+    STORE_ID = "7494588040522401840"
     START_DATE = "2025-06-01"
     END_DATE = "2025-09-18"
 
@@ -293,25 +329,20 @@ if __name__ == "__main__":
         print("LỖI: Vui lòng thiết lập biến môi trường TIKTOK_ACCESS_TOKEN trong file .env")
     else:
         try:
-            # 1. Khởi tạo reporter
             reporter = GMVCampaignProductDetailReporter(
                 access_token=ACCESS_TOKEN,
                 advertiser_id=ADVERTISER_ID,
                 store_id=STORE_ID
             )
-
-            # 2. Gọi hàm get_data để lấy kết quả
             enriched_results = reporter.get_data(start_date=START_DATE, end_date=END_DATE)
 
-            # 3. Xử lý kết quả trả về
             if enriched_results:
                 print("\n--- BƯỚC 4: LƯU KẾT QUẢ ---")
-                output_filename = "GMV_Campaign_product_detail.json"
+                output_filename = "GMV_Campaign_product_detail_v2.json"
                 with open(output_filename, "w", encoding="utf-8") as f:
                     json.dump(enriched_results, f, ensure_ascii=False, indent=4)
                 print(f"   -> Đã lưu kết quả vào file '{output_filename}'")
                 
-                # Tính tổng chi phí
                 total_cost = sum(
                     float(perf.get("metrics", {}).get("cost", 0))
                     for campaign in enriched_results
