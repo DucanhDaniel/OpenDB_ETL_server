@@ -4,3 +4,6 @@ requests
 python-json-logger
 gunicorn
 dotenv
+celery
+redis
+gevent
