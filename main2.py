@@ -3,8 +3,8 @@ import logging
 import requests
 from typing import List, Dict, Any, Optional
 
-from services.gmv.campaign_creative_detail import GMVCampaignCreativeDetailReporter
-from services.gmv.campaign_product_detail import GMVCampaignProductDetailReporter
+from services.gmv.campaign_creative_detail import GMVCampaignCreativeDetailReporter, _flatten_creative_report
+from services.gmv.campaign_product_detail import GMVCampaignProductDetailReporter, _flatten_product_report
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -17,101 +17,6 @@ app = FastAPI(
     version="1.2.0"
 )
 
-# --- NEW: Data Flattening Logic ---
-
-def _flatten_product_report(
-    campaign_data_list: List[Dict[str, Any]],
-    context: Dict[str, Any]
-) -> List[Dict[str, Any]]:
-    """
-    Flattens the raw product report data into a list of rows, ready for a spreadsheet.
-    This logic mirrors the Google Apps Script _flattenTiktokProductReport function.
-    """
-    flattened_data = []
-    for campaign in campaign_data_list:
-        row = {
-                # General info from context
-                "start_date": campaign.get("start_date"),
-                "end_date": campaign.get("end_date"),
-                "advertiser_id": context.get("advertiser_id"),
-                "advertiser_name": context.get("advertiser_name"),
-                "store_id": context.get("store_id"),
-                "store_name": context.get("store_name"),
-
-                # Campaign info
-                "campaign_id": campaign.get("campaign_id"),
-                "campaign_name": campaign.get("campaign_name"),
-                "operation_status": campaign.get("operation_status"),
-                "bid_type": campaign.get("bid_type"),
-
-                # Product info and dimensions
-                "item_group_id": campaign.get("item_group_id"),
-                "stat_time_day": campaign.get("stat_time_day"),
-                "product_name": campaign.get("product_info", {}).get("title"),
-                "product_image_url": campaign.get("product_info", {}).get("product_image_url"),
-                "product_status": campaign.get("product_info", {}).get("status"),
-                "product_img": campaign.get("product_info", {}).get("product_image_url"),
-            }
-            # Add all metrics dynamically
-        row.update(campaign.get("metrics", {}))
-        flattened_data.append(row)
-            
-    return flattened_data
-
-def _flatten_creative_report(
-    campaign_data_list: List[Dict[str, Any]],
-    context: Dict[str, Any]
-) -> List[Dict[str, Any]]:
-    """
-    Flattens the raw creative report data into a list of rows.
-    This logic mirrors the Google Apps Script _flattenTiktokCreativeReport function.
-    """
-    flattened_data = []
-    for campaign in campaign_data_list:
-        if not campaign.get("performance_data"):
-            continue
-        
-        for perf_group in campaign["performance_data"]:
-            if not perf_group.get("creative_details"):
-                continue
-
-            for creative in perf_group["creative_details"]:
-                row = {
-                    # General info from context
-                    "start_date": campaign.get("start_date"),
-                    "end_date": campaign.get("end_date"),
-                    "advertiser_id": context.get("advertiser_id"),
-                    "advertiser_name": context.get("advertiser_name"),
-                    "store_id": context.get("store_id"),
-                    "store_name": context.get("store_name"),
-
-                    # Campaign info
-                    "campaign_id": campaign.get("campaign_id"),
-                    "campaign_name": campaign.get("campaign_name"),
-                    "operation_status": campaign.get("operation_status"),
-
-                    # Product Group & Details info
-                    "item_group_id": perf_group.get("dimensions", {}).get("item_group_id"),
-                    "product_name": perf_group.get("product_details", {}).get("product_title"),
-                    "product_status": perf_group.get("product_details", {}).get("product_status"),
-                    "product_image_url": perf_group.get("product_details", {}).get("product_image_url"),
-                    
-                    # Creative Info
-                    "item_id": creative.get("item_id"),
-                    "title": creative.get("metadata", {}).get("title"),
-                    "tt_account_name": creative.get("metadata", {}).get("tt_account_name"),
-                    "tt_account_profile_image_url": creative.get("metadata", {}).get("tt_account_profile_image_url"),
-                    "product_img": creative.get("metadata", {}).get("product_img") or perf_group.get("product_details", {}).get("product_image_url"),
-                }
-                # Add all metrics dynamically
-                row.update(creative.get("metrics", {}))
-                flattened_data.append(row)
-                
-    return flattened_data
-
-
-# --- Helper function for background task ---
-
 def process_report_and_callback(context: Dict[str, Any]):
     """
     This function runs in the background. It fetches, flattens, and then
@@ -123,21 +28,41 @@ def process_report_and_callback(context: Dict[str, Any]):
     callback_url = context["callback_url"]
     
     logger.info(f"[Job ID: {job_id}] Background task started for type: {task_type}.")
-    
+
+    # -------------------------------------------------------------------------------------
+    # Hàm gửi thông tin progress
+    def send_progress_update(status: str, message: str, progress: int):
+        """Gửi một payload cập nhật tiến trình về callback URL."""
+        try:
+            progress_payload = {
+                "job_id": job_id,
+                "status": status, # Sẽ là "RUNNING"
+                "message": message,
+                "progress": progress
+            }
+            logger.info(f"[Job ID: {job_id}] Sending progress: {message}")
+            requests.post(callback_url, json=progress_payload, timeout=15)
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"[Job ID: {job_id}] Could not send progress update: {e}")
+    # -------------------------------------------------------------------------------------
+
     try:
+        send_progress_update(status="RUNNING", message="Server đã nhận request, bắt đầu khởi tạo...", progress=0)
         # 1. Select the correct reporter and flattening function
         if task_type == "creative":
             reporter = GMVCampaignCreativeDetailReporter(
                 access_token=context["access_token"],
                 advertiser_id=context["advertiser_id"],
-                store_id=context["store_id"]
+                store_id=context["store_id"],
+                progress_callback=send_progress_update
             )
             flatten_function = _flatten_creative_report
         elif task_type == "product":
             reporter = GMVCampaignProductDetailReporter(
                 access_token=context["access_token"],
                 advertiser_id=context["advertiser_id"],
-                store_id=context["store_id"]
+                store_id=context["store_id"],
+                progress_callback=send_progress_update
             )
             flatten_function = _flatten_product_report
         else:

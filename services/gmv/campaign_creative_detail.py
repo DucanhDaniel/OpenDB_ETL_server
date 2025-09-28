@@ -2,13 +2,13 @@ import requests
 import json
 import time
 import random
+from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, date
 from calendar import monthrange
 from dotenv import load_dotenv
 import os
 
-# Tải các biến môi trường từ file .env một lần khi module được import
 load_dotenv()
 
 class GMVCampaignCreativeDetailReporter:
@@ -23,7 +23,7 @@ class GMVCampaignCreativeDetailReporter:
     CATALOG_API_URL = "https://business-api.tiktok.com/open_api/v1.3/store/product/get/"
     BC_API_URL = "https://business-api.tiktok.com/open_api/v1.3/bc/get/"
 
-    def __init__(self, access_token: str, advertiser_id: str, store_id: str):
+    def __init__(self, access_token: str, advertiser_id: str, store_id: str, progress_callback=None):
         """
         Khởi tạo reporter.
 
@@ -49,6 +49,14 @@ class GMVCampaignCreativeDetailReporter:
         self.recovery_factor = 0.8
         
         self.is_fetching_creative = False
+        
+        # Send logging to App Script server
+        self.progress_callback = progress_callback
+        
+    def _report_progress(self, message: str, progress: int):
+        """Hàm tiện ích để gọi callback nếu nó tồn tại."""
+        if self.progress_callback:
+            self.progress_callback(status="RUNNING", message=message, progress=progress)
 
     @staticmethod
     def _chunk_list(data: list, size: int):
@@ -115,7 +123,6 @@ class GMVCampaignCreativeDetailReporter:
                 time.sleep(delay)
         print("  [THẤT BẠI] Đã thử lại tối đa.")
         raise Exception("Hết số lần thử dữ liệu, vui lòng thử lại sau.")
-        return None
 
     def _fetch_all_pages(self, url: str, params: dict) -> list:
         """Lấy dữ liệu từ tất cả các trang của một endpoint API."""
@@ -381,6 +388,8 @@ class GMVCampaignCreativeDetailReporter:
         """
         # === GIAI ĐOẠN 1: LẤY DỮ LIỆU HIỆU SUẤT ===
         print("--- GIAI ĐOẠN 1: BẮT ĐẦU LẤY DỮ LIỆU HIỆU SUẤT ---")
+        self._report_progress("Bắt đầu lấy dữ liệu hiệu suất GMV...", 5)
+
         date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
         all_performance_results = []
         
@@ -425,12 +434,16 @@ class GMVCampaignCreativeDetailReporter:
         
         # === GIAI ĐOẠN 2: LẤY DANH MỤC SẢN PHẨM ===
         print("\n--- GIAI ĐOẠN 2: BẮT ĐẦU LẤY DANH MỤC SẢN PHẨM ---")
+        self._report_progress("Bắt đầu lấy dữ liệu sản phẩm...", 50)
+
         product_catalog = self._get_product_catalog()
         if not product_catalog:
             print("CẢNH BÁO: Không thể lấy danh mục sản phẩm. Dữ liệu cuối cùng sẽ không có chi tiết sản phẩm.")
 
         # === GIAI ĐOẠN 3: LÀM GIÀU DỮ LIỆU VÀ HOÀN TẤT ===
         print("\n--- GIAI ĐOẠN 3: BẮT ĐẦU LÀM GIÀU DỮ LIỆU ---")
+        self._report_progress("Bắt đầu làm giàu dữ liệu...", 90)
+
         product_info_map = self._create_product_info_map(product_catalog)
         final_data = self._enrich_with_product_details(all_performance_results, product_info_map)
         final_filtered_data = self._filter_empty_creatives(final_data)
@@ -438,6 +451,58 @@ class GMVCampaignCreativeDetailReporter:
         
 
         return final_filtered_data
+    
+def _flatten_creative_report(
+    campaign_data_list: List[Dict[str, Any]],
+    context: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    Flattens the raw creative report data into a list of rows.
+    This logic mirrors the Google Apps Script _flattenTiktokCreativeReport function.
+    """
+    flattened_data = []
+    for campaign in campaign_data_list:
+        if not campaign.get("performance_data"):
+            continue
+        
+        for perf_group in campaign["performance_data"]:
+            if not perf_group.get("creative_details"):
+                continue
+
+            for creative in perf_group["creative_details"]:
+                row = {
+                    # General info from context
+                    "start_date": campaign.get("start_date"),
+                    "end_date": campaign.get("end_date"),
+                    "advertiser_id": context.get("advertiser_id"),
+                    "advertiser_name": context.get("advertiser_name"),
+                    "store_id": context.get("store_id"),
+                    "store_name": context.get("store_name"),
+
+                    # Campaign info
+                    "campaign_id": campaign.get("campaign_id"),
+                    "campaign_name": campaign.get("campaign_name"),
+                    "operation_status": campaign.get("operation_status"),
+
+                    # Product Group & Details info
+                    "item_group_id": perf_group.get("dimensions", {}).get("item_group_id"),
+                    "product_name": perf_group.get("product_details", {}).get("product_title"),
+                    "product_status": perf_group.get("product_details", {}).get("product_status"),
+                    "product_image_url": perf_group.get("product_details", {}).get("product_image_url"),
+                    
+                    # Creative Info
+                    "item_id": creative.get("item_id"),
+                    "title": creative.get("metadata", {}).get("title"),
+                    "tt_account_name": creative.get("metadata", {}).get("tt_account_name"),
+                    "tt_account_profile_image_url": creative.get("metadata", {}).get("tt_account_profile_image_url"),
+                    "product_img": creative.get("metadata", {}).get("product_img") or perf_group.get("product_details", {}).get("product_image_url"),
+                }
+                # Add all metrics dynamically
+                row.update(creative.get("metrics", {}))
+                flattened_data.append(row)
+                
+    return flattened_data
+
 
 # --- HÀM CHÍNH ĐỂ CHẠY (VÍ DỤ SỬ DỤNG) ---
 if __name__ == "__main__":
@@ -495,3 +560,4 @@ if __name__ == "__main__":
 
         end_time = time.perf_counter()
         print(f"\nTổng thời gian thực thi: {end_time - start_time:.2f} giây.")
+        

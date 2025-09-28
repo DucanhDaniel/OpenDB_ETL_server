@@ -3,6 +3,8 @@ import json
 import time
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Any, Optional
+
 from datetime import datetime, date
 from calendar import monthrange
 from dotenv import load_dotenv
@@ -23,7 +25,7 @@ class GMVCampaignProductDetailReporter:
     PRODUCT_API_URL = "https://business-api.tiktok.com/open_api/v1.3/store/product/get/"
     PERFORMANCE_API_URL = "https://business-api.tiktok.com/open_api/v1.3/gmv_max/report/get/"
 
-    def __init__(self, access_token: str, advertiser_id: str, store_id: str):
+    def __init__(self, access_token: str, advertiser_id: str, store_id: str, progress_callback=None):
         """
         Khởi tạo reporter.
 
@@ -48,6 +50,13 @@ class GMVCampaignProductDetailReporter:
         # Thuộc tính cho cơ chế throttling và backoff
         self.throttling_delay = 0.0
         self.recovery_factor = 0.8 # Giảm delay đi 20% sau mỗi lần thành công
+        
+        self.progress_callback = None
+        
+    def _report_progress(self, message: str, progress: int):
+        """Hàm tiện ích để gọi callback nếu nó tồn tại."""
+        if self.progress_callback:
+            self.progress_callback(status="RUNNING", message=message, progress=progress)
 
     # --- PHẦN 1: CÁC PHƯƠNG THỨC TIỆN ÍCH VÀ GỌI API CỐT LÕI ---
 
@@ -241,42 +250,6 @@ class GMVCampaignProductDetailReporter:
                 results[cid]["performance_data"].append(record)
         return list(results.values())
 
-    # --- PHẦN 3: PHƯƠNG THỨC CHÍNH VÀ GỘP DỮ LIỆU ---
-
-    # def _enrich_campaign_data(self, campaign_results, product_map):
-    #     print("\n--- BƯỚC 3: GỘP DỮ LIỆU SẢN PHẨM VÀO CAMPAIGN ---")
-    #     if not product_map:
-    #         print("   -> Cảnh báo: Không có bản đồ sản phẩm. Dữ liệu sẽ không được làm giàu.")
-    #         return campaign_results
-            
-    #     enriched_results = []
-    #     unique_campaigns = {}
-
-    #     for campaign in campaign_results:
-    #         campaign_id = campaign.get("campaign_id")
-    #         if not campaign_id: continue
-
-    #         # Gộp các record của cùng một campaign lại
-    #         if campaign_id not in unique_campaigns:
-    #             unique_campaigns[campaign_id] = campaign
-    #         else:
-    #             unique_campaigns[campaign_id]["performance_data"].extend(campaign.get("performance_data", []))
-
-    #     for campaign in unique_campaigns.values():
-    #         if not campaign.get("performance_data"):
-    #             continue
-            
-    #         for perf_record in campaign["performance_data"]:
-    #             item_id = perf_record.get("dimensions", {}).get("item_group_id")
-    #             if item_id:
-    #                 perf_record["product_info"] = product_map.get(item_id, {"title": f"Không tìm thấy thông tin cho ID {item_id}"})
-    #         enriched_results.append(campaign)
-            
-    #     print("   -> Đã gộp dữ liệu thành công.")
-    #     return enriched_results
-
-# --- PHẦN 3: PHƯƠNG THỨC CHÍNH VÀ GỘP DỮ LIỆU ---
-
     def _enrich_campaign_data(self, campaign_results, product_map):
         """
         Làm phẳng và gộp dữ liệu. Mỗi bản ghi hiệu suất sẽ là một mục riêng biệt
@@ -335,6 +308,7 @@ class GMVCampaignProductDetailReporter:
         chiến dịch, và gộp chúng lại.
         """
         # BƯỚC 1: Lấy dữ liệu sản phẩm
+        self._report_progress("Đang lấy dữ liệu sản phẩm", 5)
         product_map = self._get_product_map()
         if not product_map:
             print("Không thể lấy dữ liệu sản phẩm. Dừng thực thi.")
@@ -342,11 +316,13 @@ class GMVCampaignProductDetailReporter:
 
         # BƯỚC 2: Lấy dữ liệu campaign
         print("\n--- BƯỚC 2: LẤY DỮ LIỆU CAMPAIGN ---")
+        self._report_progress("Bắt đầu lấy dữ liệu campaign", 15)
         date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
         all_campaign_results = []
 
         for chunk in date_chunks:
             print(f"\n>> Xử lý chunk: {chunk['start']} to {chunk['end']}")
+            self._report_progress(f"Xử lý chunk: {chunk['start']} to {chunk['end']}", 60)
             campaigns = self._get_all_campaigns(chunk['start'], chunk['end'])
             if not campaigns:
                 print("   -> Không có campaign nào trong khoảng thời gian này.")
@@ -368,8 +344,47 @@ class GMVCampaignProductDetailReporter:
                         raise
 
         # BƯỚC 3: Gộp dữ liệu
+        self._report_progress("Bắt đầu gộp dữ liệu...", 80)
         final_data = self._enrich_campaign_data(all_campaign_results, product_map)
         return final_data
+
+def _flatten_product_report(
+    campaign_data_list: List[Dict[str, Any]],
+    context: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """
+    Flattens the raw product report data into a list of rows, ready for a spreadsheet.
+    """
+    flattened_data = []
+    for campaign in campaign_data_list:
+        row = {
+                # General info from context
+                "start_date": campaign.get("start_date"),
+                "end_date": campaign.get("end_date"),
+                "advertiser_id": context.get("advertiser_id"),
+                "advertiser_name": context.get("advertiser_name"),
+                "store_id": context.get("store_id"),
+                "store_name": context.get("store_name"),
+
+                # Campaign info
+                "campaign_id": campaign.get("campaign_id"),
+                "campaign_name": campaign.get("campaign_name"),
+                "operation_status": campaign.get("operation_status"),
+                "bid_type": campaign.get("bid_type"),
+
+                # Product info and dimensions
+                "item_group_id": campaign.get("item_group_id"),
+                "stat_time_day": campaign.get("stat_time_day"),
+                "product_name": campaign.get("product_info", {}).get("title"),
+                "product_image_url": campaign.get("product_info", {}).get("product_image_url"),
+                "product_status": campaign.get("product_info", {}).get("status"),
+                "product_img": campaign.get("product_info", {}).get("product_image_url"),
+            }
+            # Add all metrics dynamically
+        row.update(campaign.get("metrics", {}))
+        flattened_data.append(row)
+            
+    return flattened_data
 
 # --- HÀM CHÍNH ĐỂ CHẠY ---
 if __name__ == "__main__":
