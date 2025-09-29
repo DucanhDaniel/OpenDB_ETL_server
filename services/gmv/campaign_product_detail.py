@@ -29,27 +29,6 @@ class GMVCampaignProductDetailReporter(GMVReporter):
         super().__init__(access_token, advertiser_id, store_id, progress_callback, job_id, redis_client)
         
 
-    def _fetch_products_from_bc_id(self, bc_id: str) -> list | None:
-        """Lấy tất cả sản phẩm cho một bc_id cụ thể bằng cách sử dụng _fetch_all_pages."""
-        print(f">> Bước 1B: Thử lấy sản phẩm với BC ID: {bc_id}...")
-        params = {'bc_id': bc_id, 'store_id': self.store_id, 'page_size': 100}
-        
-        # Thử gọi trang đầu tiên để kiểm tra quyền
-        first_page_data = self._make_api_request_with_backoff(self.PRODUCT_API_URL, {**params, 'page': 1})
-        
-        # SỬA LỖI TẠI ĐÂY: Xử lý trường hợp `first_page_data` có thể là `None`
-        if not first_page_data or first_page_data.get("code") != 0:
-            error_msg = "Không có quyền hoặc không nhận được phản hồi hợp lệ"
-            if first_page_data:
-                error_msg = first_page_data.get('message', error_msg)
-            
-            print(f"   -> Lỗi: {error_msg}. BC ID này không hợp lệ.")
-            return None
-        
-        # Nếu trang đầu tiên OK, tiếp tục lấy tất cả các trang
-        print("   -> Quyền hợp lệ. Bắt đầu lấy tất cả sản phẩm...")
-        return self._fetch_all_pages(self.PRODUCT_API_URL, params)
-    
     def _get_product_map(self) -> dict | None:
         """Lấy toàn bộ sản phẩm và chuyển thành một dictionary để tra cứu nhanh."""
         print("\n--- BƯỚC 1: LẤY VÀ CHUẨN BỊ DỮ LIỆU SẢN PHẨM ---")
@@ -59,7 +38,7 @@ class GMVCampaignProductDetailReporter(GMVReporter):
 
         all_products = []
         for bc_id in bc_ids:
-            products_list = self._fetch_products_from_bc_id(bc_id)
+            products_list = self._fetch_all_tiktok_products(bc_id)
             if products_list is not None:
                 print(f"   => THÀNH CÔNG! Tìm thấy BC ID hợp lệ: {bc_id}. Đã lấy {len(products_list)} sản phẩm.")
                 all_products = products_list

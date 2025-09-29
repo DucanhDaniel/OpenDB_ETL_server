@@ -29,16 +29,7 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
         
         super().__init__(access_token, advertiser_id, store_id, progress_callback, job_id, redis_client)
 
-
-    def _fetch_all_tiktok_products(self, bc_id: str) -> list:
-        """Lấy tất cả sản phẩm từ một Business Center ID cụ thể."""
-        print(f"--- Bắt đầu lấy dữ liệu sản phẩm cho BC ID: {bc_id} ---")
-        params = {'bc_id': bc_id, 'store_id': self.store_id, 'page_size': 100}
-        all_products = self._fetch_all_pages(self.PRODUCT_API_URL, params)
-        print(f"--- Hoàn tất lấy sản phẩm cho BC ID: {bc_id}. Tổng cộng: {len(all_products)} sản phẩm. ---")
-        self._report_progress(f"Đã lấy tổng cộng: {len(all_products)} sản phẩm.")
-        return all_products
-    
+ 
     def _fetch_creative_metadata(self, campaign_id: str, item_group_id: str, start_date: str, end_date: str) -> list:
         """Lấy thông tin metadata của creative cho một cặp (campaign_id, item_group_id)."""
         params = {
@@ -372,9 +363,12 @@ def _flatten_creative_report(
 if __name__ == "__main__":
     # --- CẤU HÌNH ---
     # Lấy thông tin từ file .env
-    ACCESS_TOKEN = "5f6e448f4574b0cef046b23a6bebb79883757750"
-    ADVERTISER_ID = "7254031264410288129"
-    STORE_ID = "7494888844653660383"      
+    # ACCESS_TOKEN = "5f6e448f4574b0cef046b23a6bebb79883757750"
+    # ADVERTISER_ID = "7254031264410288129"
+    # STORE_ID = "7494888844653660383"      
+    ACCESS_TOKEN = "414ebc8a65511360f1b1166f9c9ebe1f8292ea16"
+    ADVERTISER_ID = "7137968211592495105"
+    STORE_ID = "7494588040522401840"
     START_DATE = "2025-09-01"
     END_DATE = "2025-09-18"
 

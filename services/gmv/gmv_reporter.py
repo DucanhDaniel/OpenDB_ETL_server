@@ -4,6 +4,8 @@ import random
 from datetime import datetime, date
 from calendar import monthrange
 from ..exceptions import TaskCancelledException
+from concurrent.futures import ThreadPoolExecutor
+
 
 class GMVReporter:
     
@@ -125,46 +127,73 @@ class GMVReporter:
         print("  [THẤT BẠI] Đã thử lại tối đa.")
         raise Exception("Hết số lần thử, vui lòng kiểm tra kết nối hoặc trạng thái API và thử lại sau.")
 
-    def _fetch_all_pages(self, url: str, params: dict) -> list:
-        """Lấy dữ liệu từ tất cả các trang của một endpoint API."""
-        all_results, current_page = [], 1
-        while True:
+    def _fetch_all_tiktok_products(self, bc_id: str) -> list:
+        """Lấy tất cả sản phẩm từ một Business Center ID cụ thể."""
+        print(f"--- Bắt đầu lấy dữ liệu sản phẩm cho BC ID: {bc_id} ---")
+        params = {'bc_id': bc_id, 'store_id': self.store_id, 'page_size': 100, 'advertiser_id': self.advertiser_id, 'filtering': '{"ad_creation_eligible":"GMV_MAX"}'}
+        all_products = self._fetch_all_pages(self.PRODUCT_API_URL, params, max_threads=5)
+        print(f"--- Hoàn tất lấy sản phẩm cho BC ID: {bc_id}. Tổng cộng: {len(all_products)} sản phẩm. ---")
+        self._report_progress(f"Đã lấy tổng cộng: {len(all_products)} sản phẩm.")
+        return all_products
+   
+    
+    def _fetch_all_pages(self, url: str, params: dict, max_threads = 1) -> list:
+        """
+        Lấy dữ liệu từ tất cả các trang của một endpoint API.
+        Sử dụng đa luồng để tăng tốc nếu max_threads > 1.
+        """
+        all_results = []
+        
+        # --- BƯỚC 1: LUÔN LẤY TRANG ĐẦU TIÊN ĐỂ LẤY total_pages ---
+        first_page_params = params.copy()
+        first_page_params['page'] = 1
+        
+        first_page_data = self._make_api_request_with_backoff(url, first_page_params)
+
+        if not first_page_data or first_page_data.get("code") != 0:
+            return [] # Trả về rỗng nếu có lỗi ngay trang đầu
+        
+        page_data = first_page_data.get("data", {})
+        result_list = page_data.get("list", []) or page_data.get("store_products", [])
+        all_results.extend(result_list)
+        
+        total_pages = page_data.get("page_info", {}).get("total_page", 1)
+        print(f"   [PHÂN TRANG] Lấy trang 1/{total_pages}. Tổng số trang: {total_pages}.")
+
+        if total_pages <= 1:
+            return all_results
+
+        # --- BƯỚC 2: LẤY CÁC TRANG CÒN LẠI ĐỒNG THỜI (NẾU max_threads > 1) ---
+        
+        pages_to_fetch = list(range(2, total_pages + 1))
+
+        def fetch_page(page_num):
+            """Hàm con để lấy dữ liệu của một trang cụ thể."""
             self._check_for_cancellation()
-            params['page'] = current_page
-            data = self._make_api_request_with_backoff(url, params)
-            if not data or data.get("code") != 0: break
+            page_params = params.copy()
+            page_params['page'] = page_num
             
-            page_data = data.get("data", {})
-            # Linh hoạt lấy list kết quả từ các key khác nhau
-            result_list = page_data.get("list", []) or page_data.get("store_products", [])
-            all_results.extend(result_list)
+            data = self._make_api_request_with_backoff(url, page_params)
             
-            total_pages = page_data.get("page_info", {}).get("total_page", 1)
-            print(f"  [PHÂN TRANG] Đã lấy trang {current_page}/{total_pages}...")
+            if data and data.get("code") == 0:
+                page_data = data.get("data", {})
+                results = page_data.get("list", []) or page_data.get("store_products", [])
+                print(f"   [PHÂN TRANG] Đã lấy xong trang {page_num}/{total_pages}.")
+                return results
+            print(f"   [PHÂN TRANG] Lỗi khi lấy trang {page_num}/{total_pages}.")
+            return []
+
+        # Sử dụng ThreadPoolExecutor để chạy các request đồng thời
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+            # executor.map sẽ chạy hàm fetch_page cho mỗi phần tử trong pages_to_fetch
+            results_from_threads = executor.map(fetch_page, pages_to_fetch)
             
-            if current_page >= total_pages: break
-            current_page += 1
-            time.sleep(1.2) # Delay nhỏ giữa các trang để tránh bị block
+            # Gom kết quả từ các luồng
+            for result in results_from_threads:
+                all_results.extend(result)
+        
         return all_results
 
-    # def _get_bc_ids(self) -> list[str]:
-    #     """Lấy danh sách Business Center ID."""
-    #     print("Đang lấy danh sách BC ID...")
-    #     try:
-    #         response = requests.get(self.BC_API_URL, headers={'Access-Token': self.access_token})
-    #         response.raise_for_status()
-    #         data = response.json()
-    #         if data.get("code") == 0:
-    #             bc_list = data.get("data", {}).get("list", [])
-    #             bc_ids = [bc.get("bc_info", {}).get("bc_id") for bc in bc_list if bc.get("bc_info", {}).get("bc_id")]
-    #             print(f"Đã lấy thành công {len(bc_ids)} BC ID.")
-    #             self._report_progress(f"Đã lấy thành công {len(bc_ids)} BC ID.", 80)
-    #             return bc_ids
-    #     except requests.exceptions.RequestException as e:
-    #         print(f"Lỗi kết nối khi lấy BC ID: {e}")
-    #         raise Exception(f"Lỗi kết nối khi lấy BC ID: {e}")
-    #     print("Không thể lấy danh sách BC ID.")
-    #     raise Exception("Không thể lấy danh sách BC ID.")
     
     def _get_bc_ids(self) -> list[str]:
         """Lấy danh sách Business Center ID."""
