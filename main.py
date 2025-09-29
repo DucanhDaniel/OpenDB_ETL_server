@@ -51,7 +51,7 @@ def cancel_report_job(job_id: str):
     Gửi yêu cầu dừng một công việc đang chạy.
     """
     try:
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+        redis_client = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
         cancel_key = f"job:{job_id}:cancel_requested"
         # Đặt cờ yêu cầu dừng, tự hết hạn sau 1 giờ để tránh rác
         redis_client.set(cancel_key, "true", ex=3600)
