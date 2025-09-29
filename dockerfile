@@ -27,7 +27,7 @@
 
 # --- Giai đoạn 1: Builder ---
 # Sử dụng một image Python đầy đủ để cài đặt các dependency
-FROM python:3.13-slim as builder
+FROM python:3.13-slim AS builder
 
 # Thiết lập thư mục làm việc
 WORKDIR /app
