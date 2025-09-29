@@ -11,14 +11,16 @@ from services.gmv.campaign_product_detail import GMVCampaignProductDetailReporte
 from services.exceptions import TaskCancelledException # Sẽ tạo exception này ở Bước 2
 
 # Cấu hình Celery để sử dụng Redis
-celery_app = Celery('tasks', broker='redis://localhost:6379/0', backend='redis://localhost:6379/0')
+# celery_app = Celery('tasks', broker='redis://localhost:6379/0', backend='redis://localhost:6379/0')
+celery_app = Celery('tasks', broker='redis://redis:6379/0', backend='redis://redis:6379/0')
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Kết nối tới Redis để quản lý trạng thái
-redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+# redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+redis_client = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
 
 @celery_app.task
 def run_report_job(context: Dict[str, Any]):

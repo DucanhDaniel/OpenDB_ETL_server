@@ -1,0 +1,33 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  # Dịch vụ Redis
+  redis:
+    image: redis:latest
+    container_name: my-redis-server
+    ports:
+      - "6379:6379"
+
+  # Dịch vụ FastAPI API
+  api:
+    build: .
+    container_name: tiktok_api_server
+    command: uvicorn main:app --host 0.0.0.0 --port 8011
+    volumes:
+      - .:/app  # Đồng bộ code local vào container, thay đổi code là server tự reload
+    ports:
+      - "8011:8011"
+    depends_on:
+      - redis # Đảm bảo Redis khởi động trước API
+
+  # Dịch vụ Celery Worker
+  worker:
+    build: .
+    container_name: tiktok_celery_worker
+    command: celery -A celery_worker.celery_app worker -P gevent --loglevel=info
+    volumes:
+      - .:/app  # Đồng bộ code local vào container
+    depends_on:
+      - redis # Đảm bảo Redis khởi động trước Worker
