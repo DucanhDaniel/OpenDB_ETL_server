@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
 import logging
 import redis
-from typing import Dict, Any, Optional
-
-# Import tác vụ Celery
+from typing import Optional
 from celery_worker import run_report_job
+from models.schemas import CreateJobRequest
+import os 
+
+REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,37 +15,23 @@ app = FastAPI(title="TikTok Reporting API", version="2.0.0")
 
 # --- API Endpoints ---
 
-@app.get("/reports/create-job", tags=["Async Jobs"])
-def create_report_job(
-    # ... (giữ nguyên tất cả các tham số Query của bạn) ...
-    task_type: str, callback_url: str, job_id: str, task_id: str,
-    access_token: str, advertiser_id: str, store_id: str,
-    start_date: str, end_date: str,
-    advertiser_name: Optional[str] = None, store_name: Optional[str] = None
-):
+@app.post("/reports/create-job", tags=["Async Jobs"])
+def create_report_job(job_request: CreateJobRequest):
     """
-    Tạo một công việc nền bằng Celery.
-    Phản hồi ngay lập tức và gửi dữ liệu sau qua callback_url.
+    Tạo một công việc nền bằng Celery từ một request body dạng JSON.
     """
-    logger.info(f"Received Celery job request. Job ID: {job_id}, Type: {task_type}")
-    if task_type not in ["creative", "product"]:
-        raise HTTPException(status_code=400, detail="Invalid 'task_type'.")
-
-    context = {
-        "task_type": task_type, "callback_url": callback_url, "job_id": job_id, "task_id": task_id,
-        "access_token": access_token, "advertiser_id": advertiser_id, "store_id": store_id,
-        "start_date": start_date, "end_date": end_date,
-        "advertiser_name": advertiser_name, "store_name": store_name
-    }
+    logger.info(f"Received Celery job request. Job ID: {job_request.job_id}, Type: {job_request.task_type}")
     
-    # SỬA ĐỔI: Gọi tác vụ Celery thay vì BackgroundTasks
+    context = job_request.model_dump()
+    
     run_report_job.delay(context)
 
     return {
         "status": "queued",
-        "job_id": job_id,
+        "job_id": job_request.job_id,
         "message": "Job accepted and queued for processing. Data will be sent to the callback URL."
     }
+    
 
 @app.post("/reports/{job_id}/cancel", tags=["Async Jobs"])
 def cancel_report_job(job_id: str):
@@ -51,9 +39,8 @@ def cancel_report_job(job_id: str):
     Gửi yêu cầu dừng một công việc đang chạy.
     """
     try:
-        redis_client = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
+        redis_client = redis.Redis(host='redis', port=6379, db=0, password=REDIS_PASSWORD, decode_responses=True)
         cancel_key = f"job:{job_id}:cancel_requested"
-        # Đặt cờ yêu cầu dừng, tự hết hạn sau 1 giờ để tránh rác
         redis_client.set(cancel_key, "true", ex=3600)
         logger.info(f"Cancel request sent for Job ID: {job_id}")
         return {"status": "cancel_requested", "job_id": job_id}
