@@ -4,15 +4,17 @@ import redis
 from celery import Celery
 from typing import Dict, Any
 import os
-
+from utils.utils import write_data_to_sheet, is_full_month
 from services.gmv.campaign_creative_detail import GMVCampaignCreativeDetailReporter, _flatten_creative_report
 from services.gmv.campaign_product_detail import GMVCampaignProductDetailReporter, _flatten_product_report
+from services.gmv.gmv_reporter import GMVReporter
 from services.exceptions import TaskCancelledException 
 from services.sheet_writer.gg_sheet_writer import GoogleSheetWriter
+from services.database.mongo_client import MongoDbClient
+from datetime import date, datetime
 
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
-# SPREADSHEET_ID = os.getenv('GOOGLE_SPREADSHEET_ID')
 
 celery_app = Celery(
     'tasks', 
@@ -28,21 +30,19 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True
 )
 
-# Cấu hình logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Kết nối tới Redis để quản lý trạng thái
-# redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 redis_client = redis.Redis(
     host='redis', 
     port=6379, 
     db=0, 
-    password=REDIS_PASSWORD, # <-- THÊM THAM SỐ NÀY
+    password=REDIS_PASSWORD, 
     decode_responses=True
 )
+db_client = MongoDbClient()
 
-@celery_app.task
+
+@celery_app.task(soft_time_limit=900, time_limit=1200)
 def run_report_job(context: Dict[str, Any]):
     """
     Đây là tác vụ Celery, chứa logic từ hàm process_report_and_callback cũ.
@@ -50,7 +50,6 @@ def run_report_job(context: Dict[str, Any]):
     job_id = context["job_id"]
     task_id = context["task_id"]
     task_type = context["task_type"]
-    # callback_url = context["callback_url"]
     spreadsheet_id = context["spreadsheet_id"]
     
     # Khởi tạo writer
@@ -89,41 +88,81 @@ def run_report_job(context: Dict[str, Any]):
         else:
             raise ValueError("Invalid task type specified.")
 
-        raw_data = reporter.get_data(context["start_date"], context["end_date"])
-        flattened_data = flatten_function(raw_data, context)
+        # ---------------------------------- Lấy dữ liệu -------------------------------
+        all_date_chunks = GMVReporter._generate_monthly_date_chunks(context["start_date"], context["end_date"])
+        chunks_to_fetch_from_api = []
+        cached_flattened_data = []
+        today = date.today()
+        collection_name = f"{task_type}_reports"
         
-        
-        final_message = "Hoàn tất! Không có dữ liệu mới để ghi."
-        if flattened_data:
-            send_progress_update(status="RUNNING", message="Đã lấy xong dữ liệu, bắt đầu ghi...", progress=95)
-            
-            if not spreadsheet_id:
-                raise ValueError("Chưa có spreadsheet_id.")
+        for chunk in all_date_chunks:
+            chunk_start = datetime.strptime(chunk['start'], '%Y-%m-%d').date()
+            chunk_end = datetime.strptime(chunk['end'], '%Y-%m-%d').date()
 
-            
+            # Luôn fetch API nếu chunk chứa ngày hôm nay
+            if chunk_start <= today <= chunk_end:
+                logger.info(f"Chunk [{chunk['start']} - {chunk['end']}] chứa ngày hiện tại, sẽ được lấy từ API.")
+                chunks_to_fetch_from_api.append(chunk)
+                continue
 
-            # Lấy các tùy chọn ghi từ context được gửi từ Apps Script
-            sheet_options = {
-                "sheetName": context.get("sheet_name"),
-                "isOverwrite": context.get("is_overwrite", False),
-                "isFirstChunk": context.get("is_first_chunk", False)
+            # Xây dựng query để tìm trong DB
+            query = {
+                "user_email": context.get("user_email"),
+                "advertiser_id": context.get("advertiser_id"),
+                "store_id": context.get("store_id"),
+                "start_date": chunk['start'],
+                "end_date": chunk['end']
             }
             
-            # Lấy selected_fields từ context
-            selected_fields = context.get("selected_fields")
-
-            # Ưu tiên dùng selected_fields làm headers, nếu không có thì dùng như cũ để dự phòng
-            if selected_fields:
-                headers = selected_fields
-                logger.info(f"[Job ID: {job_id}] Sử dụng {len(headers)} trường đã chọn làm tiêu đề.")
-            else:
-                headers = list(flattened_data[0].keys())
-                logger.warning(f"[Job ID: {job_id}] Không có selected_fields. Sử dụng tất cả {len(headers)} trường có sẵn làm tiêu đề.")
-
-            # Ghi dữ liệu
-            rows_written = writer.write_data(flattened_data, headers, sheet_options)
-            final_message = f"Hoàn tất! Đã ghi {rows_written} dòng vào sheet '{sheet_options['sheetName']}'."
+            existing_records = db_client.find(collection_name, query)
             
+            if existing_records:
+                logger.info(f"CACHE HIT: Tìm thấy {len(existing_records)} bản ghi cho chunk [{chunk['start']} - {chunk['end']}].")
+                cached_flattened_data.extend(existing_records)
+            else:
+                logger.info(f"CACHE MISS: Không tìm thấy dữ liệu cho chunk [{chunk['start']} - {chunk['end']}], sẽ được lấy từ API.")
+                chunks_to_fetch_from_api.append(chunk)
+        
+        api_raw_data = []
+        if chunks_to_fetch_from_api:
+            send_progress_update(status="RUNNING", message=f"Đang lấy dữ liệu cho {len(chunks_to_fetch_from_api)} chunk từ API...", progress=20)
+            
+            api_raw_data = reporter.get_data(chunks_to_fetch_from_api)
+        else:
+            logger.info("Tất cả dữ liệu đã có trong cache. Không cần gọi API.")
+        # ----------------------------------- kết thúc phần lấy dữ liệu ----------------
+        
+        flattened_data_from_api = flatten_function(api_raw_data, context)
+        
+        
+        if flattened_data_from_api:
+            send_progress_update(status="RUNNING", message="Đang lọc và lưu dữ liệu vào DB...", progress=85)
+
+            # Lọc ra những bản ghi thuộc về các tháng trọn vẹn
+            data_to_save_in_db = [
+                row for row in flattened_data_from_api 
+                if is_full_month(row.get("start_date"), row.get("end_date"))
+            ]
+
+            if data_to_save_in_db:
+                logger.info(f"Tìm thấy {len(data_to_save_in_db)} bản ghi thuộc các tháng trọn vẹn để lưu vào DB.")
+                collection_name = f"{task_type}_reports"
+                user_email = context.get("user_email")
+                db_client.save_flattened_reports(
+                    collection_name=collection_name,
+                    data=data_to_save_in_db,
+                    user_email=user_email
+                )
+            else:
+                logger.info("Không có dữ liệu mới nào thuộc tháng trọn vẹn để lưu vào DB.")
+        
+            
+        # -------------------------- GHI DỮ LIỆU RA SHEET --------------------------
+        final_flattened_data = cached_flattened_data + flattened_data_from_api
+        final_message = "Hoàn tất! Không có dữ liệu mới để ghi."
+        if final_flattened_data:
+            send_progress_update(status="RUNNING", message="Đã lấy xong dữ liệu, bắt đầu ghi...", progress=95)
+            final_message = write_data_to_sheet(job_id, spreadsheet_id, context, final_flattened_data, writer)
         
         callback_payload = {
             "job_id": job_id, 
@@ -144,7 +183,6 @@ def run_report_job(context: Dict[str, Any]):
 
     try:
         logger.info(f"[Job ID: {job_id}] Sending final data sheet_ID: {spreadsheet_id}")
-        # requests.post(callback_url, json=callback_payload, timeout=60).raise_for_status()
         send_progress_update(callback_payload["status"], callback_payload["message"])
         logger.info(f"[Job ID: {job_id}] Final callback sent successfully.")
     except requests.exceptions.RequestException as e:

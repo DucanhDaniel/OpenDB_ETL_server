@@ -1,8 +1,26 @@
-# docker-compose.yml
-
-version: '3.8'
+# version: '3.8'
 
 services:
+  mongo:
+    image: mongo:latest
+    container_name: my-mongo-db
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: |
+        mongosh --host localhost --port 27017 -u ${MONGO_ROOT_USER} -p ${MONGO_ROOT_PASSWORD} --authenticationDatabase admin --eval "quit(db.runCommand({ ping: 1 }).ok ? 0 : 1)"
+      interval: 100s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: mongod --quiet
+
   # Dịch vụ Redis
   redis:
     image: redis:latest
@@ -36,3 +54,6 @@ services:
       - .env
     depends_on:
       - redis 
+
+volumes:
+  mongo-data:

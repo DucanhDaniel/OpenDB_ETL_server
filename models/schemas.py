@@ -14,6 +14,9 @@ class CreateJobRequest(BaseModel):
     advertiser_name: Optional[str] = None
     store_name: Optional[str] = None
     
+    # Thông tin user
+    user_email: str
+    
     # --- Thông tin cho việc ghi Sheet ---
     spreadsheet_id: str
     sheet_name: str

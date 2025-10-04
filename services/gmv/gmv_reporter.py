@@ -1,11 +1,11 @@
 import requests
 import time
 import random
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from calendar import monthrange
 from ..exceptions import TaskCancelledException
 from concurrent.futures import ThreadPoolExecutor
-
+from ..rate_limiter.rate_limiter import RedisRateLimiter
 
 class GMVReporter:
     
@@ -44,8 +44,12 @@ class GMVReporter:
         self.redis_client = redis_client
         self.cancel_key = f"job:{self.job_id}:cancel_requested" if self.job_id else None
         
-        print("------------------------- cancel_key \n", self.cancel_key)
-        print("------------------------- redis_client \n", redis_client)
+        if self.redis_client:
+            gmv_rules = [
+                (2, 1), # 2 request mỗi giây
+                (45, 60) # 45 request mỗi phút
+            ]
+            self.gmv_limiter = RedisRateLimiter(redis_client, rules = gmv_rules)
 
     # --- Các phương thức điều khiển tác vụ ---
     def _check_for_cancellation(self):
@@ -77,6 +81,34 @@ class GMVReporter:
             if next_month > 12: next_month, next_year = 1, next_year + 1
             cursor = date(next_year, next_month, 1)
         return chunks
+    
+    def _generate_weekly_date_chunks(start_date_str: str, end_date_str: str) -> list:
+        """
+        Chia một khoảng thời gian thành các chunk nhỏ, mỗi chunk dài 7 ngày.
+        Chunk cuối cùng có thể ngắn hơn 7 ngày.
+        """
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+        
+        chunks = []
+        cursor = start_date
+        
+        while cursor <= end_date:
+            # Ngày bắt đầu của chunk là con trỏ hiện tại
+            chunk_start = cursor
+            
+            # Ngày kết thúc của chunk là 6 ngày sau đó, nhưng không được vượt quá end_date tổng
+            chunk_end = min(cursor + timedelta(days=6), end_date)
+            
+            chunks.append({
+                'start': chunk_start.strftime('%Y-%m-%d'),
+                'end': chunk_end.strftime('%Y-%m-%d')
+            })
+            
+            # Di chuyển con trỏ đến ngày bắt đầu của chunk tiếp theo (7 ngày sau)
+            cursor += timedelta(days=7)
+            
+        return chunks
         
     @staticmethod
     def _chunk_list(data, size):
@@ -92,6 +124,14 @@ class GMVReporter:
         
         for attempt in range(max_retries):
             try:
+                
+                # Rate limiter cho GMV MAX
+                if (url == self.PERFORMANCE_API_URL) :
+                    rate_limit_key = f"ratelimit:{self.advertiser_id}:{url}"
+                    while not self.gmv_limiter.acquire(rate_limit_key):
+                        print(f"  [RATE LIMITER] Đã đạt giới hạn, đang chờ 1 giây...")
+                        time.sleep(1)
+                
                 response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
                 data = response.json()
@@ -99,6 +139,8 @@ class GMVReporter:
                 if data.get("code") == 0: 
                     # Giảm dần delay nếu yêu cầu thành công
                     self.throttling_delay *= self.recovery_factor
+                    if (self.throttling_delay > 190):
+                        self.throttling_delay = 0 # recover sau 5 phút đợi
                     if self.throttling_delay < 0.1: self.throttling_delay = 0
                     return data
                 
@@ -137,7 +179,7 @@ class GMVReporter:
         return all_products
    
     
-    def _fetch_all_pages(self, url: str, params: dict, max_threads = 1) -> list:
+    def _fetch_all_pages(self, url: str, params: dict, max_threads = 1, throttling_delay = None) -> list:
         """
         Lấy dữ liệu từ tất cả các trang của một endpoint API.
         Sử dụng đa luồng để tăng tốc nếu max_threads > 1.
@@ -148,6 +190,8 @@ class GMVReporter:
         first_page_params = params.copy()
         first_page_params['page'] = 1
         
+        if (throttling_delay):
+            self.throttling_delay = throttling_delay
         first_page_data = self._make_api_request_with_backoff(url, first_page_params)
 
         if not first_page_data or first_page_data.get("code") != 0:
@@ -173,6 +217,8 @@ class GMVReporter:
             page_params = params.copy()
             page_params['page'] = page_num
             
+            if throttling_delay:
+                self.throttling_delay = throttling_delay
             data = self._make_api_request_with_backoff(url, page_params)
             
             if data and data.get("code") == 0:

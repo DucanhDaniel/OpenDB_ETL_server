@@ -148,7 +148,7 @@ class GMVCampaignProductDetailReporter(GMVReporter):
         print(f"   -> Đã làm phẳng và gộp thành công {len(flattened_records)} bản ghi chi tiết.")
         return flattened_records
     
-    def get_data(self, start_date: str, end_date: str) -> list:
+    def get_data(self, date_chunks) -> list:
         """
         Hàm chính để chạy toàn bộ quy trình: lấy sản phẩm, lấy hiệu suất
         chiến dịch, và gộp chúng lại.
@@ -163,7 +163,7 @@ class GMVCampaignProductDetailReporter(GMVReporter):
         # BƯỚC 2: Lấy dữ liệu campaign
         print("\n--- BƯỚC 2: LẤY DỮ LIỆU CAMPAIGN ---")
         self._report_progress("Bắt đầu lấy dữ liệu campaign", 15)
-        date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
+        # date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
         all_campaign_results = []
 
         for chunk in date_chunks:
@@ -228,12 +228,11 @@ def _flatten_product_report(
             
     return flattened_data
 
-# --- HÀM CHÍNH ĐỂ CHẠY ---
+import os
 if __name__ == "__main__":
-    # --- CẤU HÌNH ---
-    ACCESS_TOKEN = "5f6e448f4574b0cef046b23a6bebb79883757750"
-    ADVERTISER_ID = "7254031264410288129"
-    STORE_ID = "7494888844653660383"      
+    ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
+    ADVERTISER_ID = "7137968211592495105"
+    STORE_ID = "7494588040522401840"
     START_DATE = "2025-09-01"
     END_DATE = "2025-09-18"
 

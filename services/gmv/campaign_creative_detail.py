@@ -49,8 +49,7 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
             "page_size": 1000,
         }
         
-        # Sử dụng lại phương thức _fetch_all_pages của class
-        return self._fetch_all_pages(self.PERFORMANCE_API_URL, params)
+        return self._fetch_all_pages(self.PERFORMANCE_API_URL, params, throttling_delay=0.3)
 
     def _get_product_catalog(self) -> list:
         """Lấy danh mục sản phẩm từ BC ID hợp lệ đầu tiên tìm thấy."""
@@ -199,7 +198,8 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
         self.is_fetching_creative = True
         for i, (product_perf, cid, igid, s_date, e_date) in enumerate(tasks, 1):
             print(f"   Đang lấy metadata cho cặp ({cid}, {igid}) - {i}/{len(tasks)}...", end='\r')
-            self._report_progress(f"Lấy metadata: {i}/{len(tasks)}", 80)
+            if (i % 10 == 0):
+                self._report_progress(f"Lấy metadata: {i}/{len(tasks)}", 80)
             metadata_list = self._fetch_creative_metadata(cid, igid, s_date, e_date)
             
             # Tạo map để tra cứu nhanh metadata theo item_id
@@ -233,7 +233,7 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
         return enriched_campaign_data
     
     # --- HÀM CÔNG KHAI (PUBLIC) ---
-    def get_data(self, start_date: str, end_date: str) -> list:
+    def get_data(self, date_chunks) -> list:
         """
         Hàm chính để chạy toàn bộ quy trình lấy và xử lý dữ liệu.
 
@@ -249,7 +249,7 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
         print("--- GIAI ĐOẠN 1: BẮT ĐẦU LẤY DỮ LIỆU HIỆU SUẤT ---")
         self._report_progress("Bắt đầu lấy dữ liệu hiệu suất GMV...", 5)
 
-        date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
+        # date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
         all_performance_results = []
         
         for chunk in date_chunks:
@@ -360,13 +360,9 @@ def _flatten_creative_report(
 
 
 # --- HÀM CHÍNH ĐỂ CHẠY (VÍ DỤ SỬ DỤNG) ---
+import os
 if __name__ == "__main__":
-    # --- CẤU HÌNH ---
-    # Lấy thông tin từ file .env
-    # ACCESS_TOKEN = "5f6e448f4574b0cef046b23a6bebb79883757750"
-    # ADVERTISER_ID = "7254031264410288129"
-    # STORE_ID = "7494888844653660383"      
-    ACCESS_TOKEN = "414ebc8a65511360f1b1166f9c9ebe1f8292ea16"
+    ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
     ADVERTISER_ID = "7137968211592495105"
     STORE_ID = "7494588040522401840"
     START_DATE = "2025-09-01"

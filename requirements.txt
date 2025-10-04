@@ -9,3 +9,5 @@ redis
 gevent
 gspread 
 google-auth-oauthlib
+pymongo 
+python-dotenv
