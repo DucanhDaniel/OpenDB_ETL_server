@@ -109,7 +109,7 @@ class GoogleSheetWriter:
             # Chuyển đổi list of dicts thành list of lists
             rows = [list(headers)] + [[row.get(h, '') for h in headers] for row in data_to_write]
             
-            worksheet.update('A1', rows, value_input_option='USER_ENTERED')
+            worksheet.update(range_name = 'A1', values = rows, value_input_option='USER_ENTERED')
             
             # Định dạng header
             worksheet.format("1:1", {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
@@ -128,7 +128,7 @@ class GoogleSheetWriter:
         if new_headers_to_add:
             print(f"Phát hiện cột mới: {new_headers_to_add}. Đang thêm vào sheet...")
             start_col = len(existing_headers) + 1
-            worksheet.update(gspread.utils.rowcol_to_a1(1, start_col), [new_headers_to_add], value_input_option='USER_ENTERED')
+            worksheet.update(range_name=gspread.utils.rowcol_to_a1(1, start_col), values=[new_headers_to_add], value_input_option='USER_ENTERED')
             worksheet.format(f"1:1", {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
 
         final_headers = existing_headers + new_headers_to_add
@@ -174,7 +174,7 @@ class GoogleSheetWriter:
             ]
             
             # Ghi đè vào các ô đầu tiên của sheet
-            worksheet.update('A1', data)
+            worksheet.update(range_name='A1', values=data)
             print(f"Logged progress for task {task_id}: {message}")
 
         except Exception as e:
