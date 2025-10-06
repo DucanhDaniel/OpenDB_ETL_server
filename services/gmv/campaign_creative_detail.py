@@ -64,7 +64,7 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
                 self._report_progress(f"Đã lấy {len(products)} sản phẩm.", 80)
                 # return products
             products.extend(bc_products)
-        return []
+        return products
 
     def _process_campaign_batch(self, campaign_batch: list[tuple], start_date: str, end_date: str) -> list:
         """Xử lý một lô campaign để lấy dữ liệu hiệu suất sản phẩm và creative."""
