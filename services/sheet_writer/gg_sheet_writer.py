@@ -109,7 +109,7 @@ class GoogleSheetWriter:
             # Chuyển đổi list of dicts thành list of lists
             rows = [list(headers)] + [[row.get(h, '') for h in headers] for row in data_to_write]
             
-            worksheet.update('A1', rows)
+            worksheet.update('A1', rows, value_input_option='USER_ENTERED')
             
             # Định dạng header
             worksheet.format("1:1", {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
@@ -128,7 +128,7 @@ class GoogleSheetWriter:
         if new_headers_to_add:
             print(f"Phát hiện cột mới: {new_headers_to_add}. Đang thêm vào sheet...")
             start_col = len(existing_headers) + 1
-            worksheet.update(gspread.utils.rowcol_to_a1(1, start_col), [new_headers_to_add])
+            worksheet.update(gspread.utils.rowcol_to_a1(1, start_col), [new_headers_to_add], value_input_option='USER_ENTERED')
             worksheet.format(f"1:1", {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
 
         final_headers = existing_headers + new_headers_to_add
@@ -218,8 +218,8 @@ if __name__ == '__main__':
         # Giả sử ghi lần đầu
         writer.write_data(sample_data, sample_headers, {**options_append, 'sheetName': 'TestAppend', 'isFirstChunk': True})
         # Ghi tiếp với dữ liệu mới và header mới
-        new_data = [{'campaign_id': 'xyz', 'spend': 50.0, 'roi': 1.5}]
-        new_headers = ['campaign_id', 'spend', 'roi']
+        new_data = [{'campaign_id': 'xyz', 'cost': 50, 'roi': 15}]
+        new_headers = ['campaign_id', 'cost', 'roi']
         rows_written_append = writer.write_data(new_data, new_headers, options_append)
         print(f"Kết thúc test ghi tiếp. Đã ghi {rows_written_append} dòng mới.")
 

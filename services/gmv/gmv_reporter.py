@@ -50,6 +50,12 @@ class GMVReporter:
                 (45, 60) # 45 request mỗi phút
             ]
             self.gmv_limiter = RedisRateLimiter(redis_client, rules = gmv_rules)
+            
+            basic_rules = [
+                (8, 1), # 8 request mỗi giây
+                (550, 60) # 550 requests mỗi phút
+            ]
+            self.basic_limiter = RedisRateLimiter(redis_client, rules = basic_rules)
 
     # --- Các phương thức điều khiển tác vụ ---
     def _check_for_cancellation(self):
@@ -124,14 +130,7 @@ class GMVReporter:
         
         for attempt in range(max_retries):
             try:
-                
-                # Rate limiter cho GMV MAX
-                if (url == self.PERFORMANCE_API_URL) :
-                    rate_limit_key = f"ratelimit:{self.advertiser_id}:{url}"
-                    while not self.gmv_limiter.acquire(rate_limit_key):
-                        print(f"  [RATE LIMITER] Đã đạt giới hạn, đang chờ 1 giây...")
-                        time.sleep(1)
-                
+                self.check_rate_limit(url)
                 response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
                 data = response.json()
@@ -260,3 +259,15 @@ class GMVReporter:
         print("Không thể lấy danh sách BC ID.")
         # Bạn có thể raise Exception hoặc trả về list rỗng tùy logic mong muốn
         raise Exception("Không thể lấy danh sách BC ID.")
+    
+    def check_rate_limit(self, url):
+        # Rate limiter cho GMV MAX
+        rate_limit_key = f"ratelimit:{self.advertiser_id}:{url}"
+        if (url == self.PERFORMANCE_API_URL) :
+            self.check_limiter(self.gmv_limiter, rate_limit_key)
+        self.check_limiter(self.basic_limiter, rate_limit_key)
+            
+    def check_limiter(self, limiter : RedisRateLimiter, key : str):
+        while not limiter.acquire(key):
+            print(f"  [RATE LIMITER] Đã đạt giới hạn, đang chờ 1 giây...")
+            time.sleep(1)
