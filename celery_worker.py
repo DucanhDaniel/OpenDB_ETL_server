@@ -11,7 +11,7 @@ from services.gmv.gmv_reporter import GMVReporter
 from services.exceptions import TaskCancelledException 
 from services.sheet_writer.gg_sheet_writer import GoogleSheetWriter
 from services.database.mongo_client import MongoDbClient
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
@@ -92,15 +92,15 @@ def run_report_job(context: Dict[str, Any]):
         all_date_chunks = GMVReporter._generate_monthly_date_chunks(context["start_date"], context["end_date"])
         chunks_to_fetch_from_api = []
         cached_flattened_data = []
-        today = date.today()
+        accurate_data_date = date.today() - timedelta(days = 2)
         collection_name = f"{task_type}_reports"
         
         for chunk in all_date_chunks:
             chunk_start = datetime.strptime(chunk['start'], '%Y-%m-%d').date()
             chunk_end = datetime.strptime(chunk['end'], '%Y-%m-%d').date()
 
-            # Luôn fetch API nếu chunk chứa ngày hôm nay
-            if chunk_start <= today <= chunk_end:
+            # Luôn fetch API nếu chunk chứa khoảng không ổn định dữ liệu
+            if chunk_start <= accurate_data_date <= chunk_end:
                 logger.info(f"Chunk [{chunk['start']} - {chunk['end']}] chứa ngày hiện tại, sẽ được lấy từ API.")
                 chunks_to_fetch_from_api.append(chunk)
                 continue
