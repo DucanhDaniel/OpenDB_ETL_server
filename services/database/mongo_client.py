@@ -33,7 +33,7 @@ class MongoDbClient:
 
         for row in data:
             unique_id = (
-                f"{user_email}_"
+                # f"{user_email}_"
                 f"{row.get('advertiser_id')}_"
                 f"{row.get('store_id')}_"
                 f"{row.get('campaign_id')}_"
