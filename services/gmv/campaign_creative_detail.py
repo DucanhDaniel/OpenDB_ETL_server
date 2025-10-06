@@ -56,12 +56,14 @@ class GMVCampaignCreativeDetailReporter(GMVReporter):
         bc_ids_list = self._get_bc_ids()
         if not bc_ids_list:
             return []
+        products = []
         for bc_id in bc_ids_list:
-            products = self._fetch_all_tiktok_products(bc_id)
+            bc_products = self._fetch_all_tiktok_products(bc_id)
             if products:
                 print(f"\n=> Tìm thấy BC ID hợp lệ: {bc_id}. Đã lấy {len(products)} sản phẩm.")
                 self._report_progress(f"Đã lấy {len(products)} sản phẩm.", 80)
-                return products
+                # return products
+            products.extend(bc_products)
         return []
 
     def _process_campaign_batch(self, campaign_batch: list[tuple], start_date: str, end_date: str) -> list:
@@ -363,8 +365,8 @@ def _flatten_creative_report(
 import os
 if __name__ == "__main__":
     ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
-    ADVERTISER_ID = "7137968211592495105"
-    STORE_ID = "7494588040522401840"
+    ADVERTISER_ID = "6967547145545105410"
+    STORE_ID = "7494600253418473607"
     START_DATE = "2025-09-01"
     END_DATE = "2025-09-18"
 
@@ -382,7 +384,10 @@ if __name__ == "__main__":
             )
             
             # 2. Gọi hàm get_data để thực hiện toàn bộ quy trình
-            final_data = reporter.get_data(start_date=START_DATE, end_date=END_DATE)
+            final_data = reporter.get_data([{
+                'start': START_DATE,
+                'end': END_DATE
+            }])
 
             # 3. Xử lý kết quả trả về (tính toán, lưu file, etc.)
             if final_data:

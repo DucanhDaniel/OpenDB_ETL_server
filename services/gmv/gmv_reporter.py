@@ -130,7 +130,8 @@ class GMVReporter:
         
         for attempt in range(max_retries):
             try:
-                self.check_rate_limit(url)
+                if self.redis_client:
+                    self.check_rate_limit(url)
                 response = self.session.get(url, params=params, timeout=60)
                 response.raise_for_status()
                 data = response.json()
@@ -172,7 +173,11 @@ class GMVReporter:
         """Lấy tất cả sản phẩm từ một Business Center ID cụ thể."""
         print(f"--- Bắt đầu lấy dữ liệu sản phẩm cho BC ID: {bc_id} ---")
         params = {'bc_id': bc_id, 'store_id': self.store_id, 'page_size': 100, 'advertiser_id': self.advertiser_id, 'filtering': '{"ad_creation_eligible":"GMV_MAX"}'}
-        all_products = self._fetch_all_pages(self.PRODUCT_API_URL, params, max_threads=5)
+        try:
+            all_products = self._fetch_all_pages(self.PRODUCT_API_URL, params, max_threads=5)
+        except Exception as e:
+            print(e)
+            all_products = []
         print(f"--- Hoàn tất lấy sản phẩm cho BC ID: {bc_id}. Tổng cộng: {len(all_products)} sản phẩm. ---")
         self._report_progress(f"Đã lấy tổng cộng: {len(all_products)} sản phẩm.")
         return all_products
@@ -262,6 +267,7 @@ class GMVReporter:
     
     def check_rate_limit(self, url):
         # Rate limiter cho GMV MAX
+        
         rate_limit_key = f"ratelimit:{self.advertiser_id}:{url}"
         if (url == self.PERFORMANCE_API_URL) :
             self.check_limiter(self.gmv_limiter, rate_limit_key)

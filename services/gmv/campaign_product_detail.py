@@ -41,8 +41,8 @@ class GMVCampaignProductDetailReporter(GMVReporter):
             products_list = self._fetch_all_tiktok_products(bc_id)
             if products_list is not None:
                 print(f"   => THÀNH CÔNG! Tìm thấy BC ID hợp lệ: {bc_id}. Đã lấy {len(products_list)} sản phẩm.")
-                all_products = products_list
-                break 
+                all_products.extend(products_list)
+                # break 
         
         if not all_products:
             print("   -> Không tìm thấy BC ID nào có thể truy cập sản phẩm của store này.")
@@ -231,8 +231,8 @@ def _flatten_product_report(
 import os
 if __name__ == "__main__":
     ACCESS_TOKEN = os.getenv("TIKTOK_ACCESS_TOKEN")
-    ADVERTISER_ID = "7137968211592495105"
-    STORE_ID = "7494588040522401840"
+    ADVERTISER_ID = "6967547145545105410"
+    STORE_ID = "7494600253418473607"
     START_DATE = "2025-09-01"
     END_DATE = "2025-09-18"
 
@@ -246,7 +246,10 @@ if __name__ == "__main__":
                 advertiser_id=ADVERTISER_ID,
                 store_id=STORE_ID
             )
-            enriched_results = reporter.get_data(start_date=START_DATE, end_date=END_DATE)
+            enriched_results = reporter.get_data([{
+                'start': START_DATE,
+                'end': END_DATE
+            }])
 
             if enriched_results:
                 print("\n--- BƯỚC 4: LƯU KẾT QUẢ ---")
@@ -266,8 +269,8 @@ if __name__ == "__main__":
 
         except ValueError as ve:
             print(f"Lỗi cấu hình: {ve}")
-        except Exception as e:
-            print(f"Đã xảy ra lỗi không mong muốn: {e}")
+        # except Exception as e:
+        #     print(f"Đã xảy ra lỗi không mong muốn: {e}")
 
     end_time = time.perf_counter()
     print(f"\n--- HOÀN TẤT ---")
