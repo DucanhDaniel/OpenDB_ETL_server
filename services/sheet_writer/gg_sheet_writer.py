@@ -107,7 +107,12 @@ class GoogleSheetWriter:
                 return 0
 
             # Chuyển đổi list of dicts thành list of lists
-            rows = [list(headers)] + [[row.get(h, '') for h in headers] for row in data_to_write]
+            # rows = [list(headers)] + [[row.get(h, '') for h in headers] for row in data_to_write]
+            rows_data = [
+                [self._create_image_formula(row.get(h, '')) if h == 'product_img' else row.get(h, '') for h in headers]
+                for row in data_to_write
+            ]
+            rows = [list(headers)] + rows_data
             
             worksheet.update(range_name = 'A1', values = rows, value_input_option='USER_ENTERED')
             
@@ -134,7 +139,10 @@ class GoogleSheetWriter:
         final_headers = existing_headers + new_headers_to_add
         
         # Chuyển đổi list of dicts thành list of lists theo đúng thứ tự của final_headers
-        rows_to_append = [[row.get(h, '') for h in final_headers] for row in data_to_write]
+        rows_to_append = [
+            [self._create_image_formula(row.get(h, '')) if h == 'product_img' else row.get(h, '') for h in final_headers]
+            for row in data_to_write
+        ]
         
         worksheet.append_rows(rows_to_append, value_input_option='USER_ENTERED')
         
@@ -179,6 +187,16 @@ class GoogleSheetWriter:
 
         except Exception as e:
             print(f"ERROR: Không thể ghi log tiến trình cho task {task_id}: {e}")
+            
+    def _create_image_formula(self, url: str) -> str:
+        """
+        Chuyển đổi một URL thành công thức =IMAGE() của Google Sheets.
+        Bỏ qua nếu URL không hợp lệ.
+        """
+        if url and isinstance(url, str) and url.startswith(('http://', 'https://')):
+            # Bao bọc URL trong dấu ngoặc kép để công thức hoạt động chính xác
+            return f'=IMAGE("{url}")'
+        return ""
 
 # --- VÍ DỤ SỬ DỤNG ---
 if __name__ == '__main__':
@@ -187,9 +205,9 @@ if __name__ == '__main__':
     SPREADSHEET_ID = '17Oa459U4lSiE_WmhVkwtkPpKFj_SAGXk0DMTA1fsJW8'
 
     # --- Chuẩn bị dữ liệu mẫu ---
-    sample_headers = ['campaign_id', 'spend', 'orders', 'ghi_chu']
+    sample_headers = ['campaign_id', 'spend', 'orders', 'ghi_chu', 'product_img']
     sample_data = [
-        {'campaign_id': '12345', 'spend': 150.75, 'orders': 5},
+        {'campaign_id': '12345', 'spend': 150.75, 'orders': 5, 'product_img': 'https://p16-oec-sg.ibyteimg.com/tos-alisg-i-aphluv4xwc-sg/8f986f8f2dc44cd8a51617e251980174~tplv-aphluv4xwc-origin-jpeg.jpeg?dr=15568&nonce=36762&refresh_token=c6720a102f51284834fc6e94abe59a8d&from=1010592719&idc=my&ps=933b5bde&shcp=9b759fb9&shp=3c3c6bcf&t=555f072d'},
         {'campaign_id': '67890', 'spend': 200.00, 'orders': 8, 'ghi_chu': 'Test note'},
         {'campaign_id': 'abcde', 'orders': 2} # Dòng này sẽ bị lọc bỏ
     ]
@@ -218,8 +236,8 @@ if __name__ == '__main__':
         # Giả sử ghi lần đầu
         writer.write_data(sample_data, sample_headers, {**options_append, 'sheetName': 'TestAppend', 'isFirstChunk': True})
         # Ghi tiếp với dữ liệu mới và header mới
-        new_data = [{'campaign_id': 'xyz', 'cost': 50, 'roi': 15}]
-        new_headers = ['campaign_id', 'cost', 'roi']
+        new_data = [{'campaign_id': 'xyz', 'cost': 50, 'roi': 15, 'product_img': 'https://p16-oec-sg.ibyteimg.com/tos-alisg-i-aphluv4xwc-sg/8f986f8f2dc44cd8a51617e251980174~tplv-aphluv4xwc-origin-jpeg.jpeg?dr=15568&nonce=36762&refresh_token=c6720a102f51284834fc6e94abe59a8d&from=1010592719&idc=my&ps=933b5bde&shcp=9b759fb9&shp=3c3c6bcf&t=555f072d'}]
+        new_headers = ['campaign_id', 'cost', 'roi', 'product_img']
         rows_written_append = writer.write_data(new_data, new_headers, options_append)
         print(f"Kết thúc test ghi tiếp. Đã ghi {rows_written_append} dòng mới.")
 
