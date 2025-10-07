@@ -13,7 +13,7 @@ class MongoDbClient:
             raise ValueError("Biến môi trường MONGO_URI chưa được thiết lập.")
             
         print("Đang kết nối tới MongoDB...")
-        self.client = MongoClient(mongo_uri)
+        self.client = MongoClient(mongo_uri, tz_aware=True)
         self.client.admin.command('ping')
         self.db = self.client[db_name]
         print(f"✅ Kết nối thành công tới database: '{db_name}'")
@@ -97,3 +97,5 @@ class MongoDbClient:
             print("✅ Các index truy vấn đã sẵn sàng.")
         except Exception as e:
             print(f"⚠️ Lỗi khi tạo index: {e}")
+            
+    

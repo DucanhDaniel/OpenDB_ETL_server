@@ -2,6 +2,8 @@ import logging
 import requests
 import redis
 from celery import Celery
+from celery.signals import task_prerun, task_postrun
+from pprint import pprint
 from typing import Dict, Any
 import os
 from utils.utils import write_data_to_sheet, is_full_month
@@ -11,7 +13,7 @@ from services.gmv.gmv_reporter import GMVReporter
 from services.exceptions import TaskCancelledException 
 from services.sheet_writer.gg_sheet_writer import GoogleSheetWriter
 from services.database.mongo_client import MongoDbClient
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
 CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
@@ -41,6 +43,66 @@ redis_client = redis.Redis(
 )
 db_client = MongoDbClient()
 
+
+@task_prerun.connect
+def on_task_prerun(sender=None, task_id=None, args=None, **kwargs):
+    if sender and 'run_report_job' in sender.name and db_client: 
+        context = args[0]
+        job_id = context.get("job_id")
+        try:
+            db_client.db.task_logs.insert_one({
+                "job_id": job_id,
+                "celery_task_id": task_id,
+                "user_email": context.get("user_email"),
+                "task_type": context.get("task_type"),
+                "advertiser_id": context.get("advertiser_id"),
+                "store_id": context.get("store_id"),
+                "date_start" : context.get("start_date"),
+                "date_stop" : context.get("end_date"),
+                "status": "STARTED",
+                "start_time": datetime.now(timezone.utc),
+                "end_time": None,
+                "duration_seconds": None,
+                "error_message": None
+            })
+        except Exception as e:
+            logger.error(f"LỖI GHI LOG (PRERUN) cho job {job_id}: {e}")
+
+@task_postrun.connect
+def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=None, **kwargs):
+    if sender and 'run_report_job' in sender.name:
+        context = args[0]
+        job_id = context.get("job_id")
+        print(f"SIGNAL POSTRUN: Cập nhật log cho job {job_id} với trạng thái {state}")
+
+        error_msg = str(retval) if state == 'FAILURE' else None
+        
+        if isinstance(retval, TaskCancelledException) or (error_msg and 'TaskCancelledException' in error_msg):
+            final_status = 'CANCELLED'
+            error_msg = "Task was cancelled by user."
+        elif state == 'SUCCESS':
+            final_status = 'SUCCESS'
+        else:
+            final_status = 'FAILED'
+
+        try:
+            end_time = datetime.now(timezone.utc)
+            
+            start_log = db_client.db.task_logs.find_one({"celery_task_id": task_id})
+            duration = (end_time - start_log['start_time']).total_seconds() if start_log else -1
+
+            db_client.db.task_logs.update_one(
+                {"celery_task_id": task_id},
+                {"$set": {
+                    "status": final_status,
+                    "end_time": end_time,
+                    "duration_seconds": round(duration, 2),
+                    "error_message": error_msg
+                }}
+            )
+        except Exception as e:
+            logger.error(f"LỖI GHI LOG (POSTRUN) cho task {task_id}: {e}")
+    
 
 @celery_app.task(soft_time_limit=900, time_limit=1200)
 def run_report_job(context: Dict[str, Any]):
@@ -157,6 +219,11 @@ def run_report_job(context: Dict[str, Any]):
                 logger.info("Không có dữ liệu mới nào thuộc tháng trọn vẹn để lưu vào DB.")
         
             
+        cancel_key = f"job:{job_id}:cancel_requested"
+        if redis_client.exists(cancel_key):
+            redis_client.delete(cancel_key)
+            raise TaskCancelledException()
+        
         # -------------------------- GHI DỮ LIỆU RA SHEET --------------------------
         final_flattened_data = cached_flattened_data + flattened_data_from_api
         final_message = "Hoàn tất! Không có dữ liệu mới để ghi."
@@ -177,13 +244,19 @@ def run_report_job(context: Dict[str, Any]):
             "job_id": job_id, "task_id": task_id,
             "status": "STOPPED", "message": "Task was cancelled by user.", "data": []
         }
+        send_progress_update(callback_payload["status"], callback_payload["message"])
+        raise
+    
     except Exception as e:
         logger.error(f"[Job ID: {job_id}] Error during data processing: {e}", exc_info=True)
         callback_payload = { "job_id": job_id, "task_id": task_id, "status": "FAILED", "message": str(e), "data": [] }
-
+        send_progress_update(callback_payload["status"], callback_payload["message"])
+        raise
+    
     try:
         logger.info(f"[Job ID: {job_id}] Sending final data sheet_ID: {spreadsheet_id}")
         send_progress_update(callback_payload["status"], callback_payload["message"])
         logger.info(f"[Job ID: {job_id}] Final callback sent successfully.")
     except requests.exceptions.RequestException as e:
         logger.error(f"[Job ID: {job_id}] Failed to send final callback: {e}", exc_info=True)
+        raise

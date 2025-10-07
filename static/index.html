@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Celery Task Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Tiktok GMV Max Dashboard</h1>
+
+        <div class="summary-cards">
+            <div class="card">
+                <h2>Total Tasks</h2>
+                <p id="total-tasks">Loading...</p>
+            </div>
+            <div class="card">
+                <h2>Successful Tasks</h2>
+                <p id="successful-tasks">Loading...</p>
+            </div>
+            <div class="card">
+                <h2>Success Rate</h2>
+                <p id="success-rate">Loading...</p>
+            </div>
+            <div class="card">
+                <h2>Avg Duration</h2>
+                <p id="avg-duration">Loading...</p>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="chart-container">
+                <h2>Task Status Breakdown</h2>
+                <canvas id="statusChart"></canvas>
+            </div>
+            <div class="api-totals">
+                <h2>API Call Totals</h2>
+                <ul id="api-totals-list">
+                    </ul>
+            </div>
+        </div>
+        
+        <div class="chart-section">
+            <h2>API Calls per Hour (Last 24h)</h2>
+            <canvas id="apiUsageChart"></canvas>
+        </div>
+
+        <div class="table-section">
+            <h2>Recent Tasks</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Task Type</th>
+                        <th>User Email</th>
+                        <th>Status</th>
+                        <th>Start Time</th>
+                        <th>End Time</th>
+                        <th>Duration (s)</th>
+                        <th>Error Message</th>
+                    </tr>
+                </thead>
+                <tbody id="tasks-table-body">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

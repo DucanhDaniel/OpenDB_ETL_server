@@ -8,6 +8,7 @@ dependencies = [
     "celery>=5.5.3",
     "dotenv>=0.9.9",
     "fastapi>=0.116.2",
+    "fastapi-cors>=0.0.6",
     "gevent>=25.9.1",
     "google-auth-oauthlib>=1.2.2",
     "gspread>=6.2.1",

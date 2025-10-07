@@ -1,7 +1,7 @@
 import requests
 import time
 import random
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from calendar import monthrange
 from ..exceptions import TaskCancelledException
 from concurrent.futures import ThreadPoolExecutor
@@ -159,7 +159,9 @@ class GMVReporter:
             
             except requests.exceptions.RequestException as e:
                 print(f"  [LỖI MẠNG] (lần {attempt + 1}/{max_retries}): {e}")
-            
+            finally:
+                self.log_api_counter(url)
+                
             if attempt < max_retries - 1:
                 delay = (base_delay ** (attempt + 1)) + random.uniform(0, 1)
                 self.throttling_delay = delay  # Kích hoạt throttling
@@ -169,6 +171,24 @@ class GMVReporter:
         print("  [THẤT BẠI] Đã thử lại tối đa.")
         raise Exception("Hết số lần thử, vui lòng kiểm tra kết nối hoặc trạng thái API và thử lại sau.")
 
+    def log_api_counter(self, url):
+        if self.redis_client:
+                try:
+                    api_call_key = f"api_calls_total:{url}"
+                    self.redis_client.incr(api_call_key)
+                    
+                    # Tạo key theo giờ, ví dụ: 'api_calls:gmv_report:2025-10-06-17'
+                    current_hour = datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')
+                    api_call_key = f"api_calls:{url}:{current_hour}"
+                    
+                    # Dùng pipeline để đảm bảo 2 lệnh được thực hiện nguyên tử
+                    pipe = self.redis_client.pipeline()
+                    pipe.incr(api_call_key)
+                    pipe.expire(api_call_key, 3600 * 24) # Giữ dữ liệu trong 24 giờ
+                    pipe.execute()
+                except Exception as e:
+                    print(f"WARNING: Không thể ghi log API call: {e}")
+                    
     def _fetch_all_tiktok_products(self, bc_id: str) -> list:
         """Lấy tất cả sản phẩm từ một Business Center ID cụ thể."""
         print(f"--- Bắt đầu lấy dữ liệu sản phẩm cho BC ID: {bc_id} ---")
