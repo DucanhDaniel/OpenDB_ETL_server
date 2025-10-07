@@ -169,7 +169,7 @@ def run_report_job(context: Dict[str, Any]):
 
             # Xây dựng query để tìm trong DB
             query = {
-                "user_email": context.get("user_email"),
+                # "user_email": context.get("user_email"),
                 "advertiser_id": context.get("advertiser_id"),
                 "store_id": context.get("store_id"),
                 "start_date": chunk['start'],
