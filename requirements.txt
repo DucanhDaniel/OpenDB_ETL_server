@@ -12,3 +12,4 @@ google-auth-oauthlib
 pymongo 
 python-dotenv
 fastapi-cors
+gunicorn
