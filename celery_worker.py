@@ -41,7 +41,10 @@ redis_client = redis.Redis(
     password=REDIS_PASSWORD, 
     decode_responses=True
 )
+
+
 db_client = MongoDbClient()
+# db_client = None
 
 
 @task_prerun.connect
@@ -88,18 +91,19 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
         try:
             end_time = datetime.now(timezone.utc)
             
-            start_log = db_client.db.task_logs.find_one({"celery_task_id": task_id})
-            duration = (end_time - start_log['start_time']).total_seconds() if start_log else -1
+            if (db_client):
+                start_log = db_client.db.task_logs.find_one({"celery_task_id": task_id})
+                duration = (end_time - start_log['start_time']).total_seconds() if start_log else -1
 
-            db_client.db.task_logs.update_one(
-                {"celery_task_id": task_id},
-                {"$set": {
-                    "status": final_status,
-                    "end_time": end_time,
-                    "duration_seconds": round(duration, 2),
-                    "error_message": error_msg
-                }}
-            )
+                db_client.db.task_logs.update_one(
+                    {"celery_task_id": task_id},
+                    {"$set": {
+                        "status": final_status,
+                        "end_time": end_time,
+                        "duration_seconds": round(duration, 2),
+                        "error_message": error_msg
+                    }}
+                )
         except Exception as e:
             logger.error(f"LỖI GHI LOG (POSTRUN) cho task {task_id}: {e}")
     
@@ -176,7 +180,8 @@ def run_report_job(context: Dict[str, Any]):
                 "end_date": chunk['end']
             }
             
-            existing_records = db_client.find(collection_name, query)
+            if (db_client): 
+                existing_records = db_client.find(collection_name, query)
             
             if existing_records:
                 logger.info(f"CACHE HIT: Tìm thấy {len(existing_records)} bản ghi cho chunk [{chunk['start']} - {chunk['end']}].")
@@ -210,6 +215,7 @@ def run_report_job(context: Dict[str, Any]):
                 logger.info(f"Tìm thấy {len(data_to_save_in_db)} bản ghi thuộc các tháng trọn vẹn để lưu vào DB.")
                 collection_name = f"{task_type}_reports"
                 user_email = context.get("user_email")
+                
                 db_client.save_flattened_reports(
                     collection_name=collection_name,
                     data=data_to_save_in_db,

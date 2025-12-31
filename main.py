@@ -34,7 +34,7 @@ async def read_root():
 def get_task_logs_from_db() -> List[Dict]:
     """Lấy log tác vụ từ MongoDB."""
     if not db_client: return []
-    tasks_cursor = db_client.db.task_logs.find({}).sort("start_time", -1).limit(100)
+    tasks_cursor = db_client.db.task_logs.find({}).sort("start_time", -1).limit(10000)
     tasks = list(tasks_cursor)
     for task in tasks:
         task['_id'] = str(task['_id'])

@@ -1,6 +1,6 @@
 // script.js
 
-const API_ENDPOINT = 'http://103.102.131.30:8011/api/dashboard';
+const API_ENDPOINT = 'http://localhost:8011/api/dashboard';
 
 let statusChartInstance = null;
 let apiUsageChartInstance = null;

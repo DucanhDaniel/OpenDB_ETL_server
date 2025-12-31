@@ -349,6 +349,7 @@ def _flatten_creative_report(
                     
                     # Creative Info
                     "item_id": creative.get("item_id"),
+                    "video_url": "https://www.tiktok.com/@user/video/" + creative.get("item_id"),
                     "title": creative.get("metadata", {}).get("title"),
                     "tt_account_name": creative.get("metadata", {}).get("tt_account_name"),
                     "tt_account_profile_image_url": creative.get("metadata", {}).get("tt_account_profile_image_url"),
