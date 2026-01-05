@@ -80,11 +80,19 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
 
         error_msg = str(retval) if state == 'FAILURE' else None
         
+        # --- [NEW] Biến lưu api usage ---
+        api_total_counts = {} 
+        # --------------------------------
+
         if isinstance(retval, TaskCancelledException) or (error_msg and 'TaskCancelledException' in error_msg):
             final_status = 'CANCELLED'
             error_msg = "Task was cancelled by user."
         elif state == 'SUCCESS':
             final_status = 'SUCCESS'
+            # --- [NEW] Lấy api_usage từ giá trị return của hàm run_report_job ---
+            if isinstance(retval, dict):
+                api_total_counts = retval.get("api_usage", {})
+            # ---------------------------------------------------------------------
         else:
             final_status = 'FAILED'
 
@@ -93,7 +101,7 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
             
             if (db_client):
                 start_log = db_client.db.task_logs.find_one({"celery_task_id": task_id})
-                duration = (end_time - start_log['start_time']).total_seconds() if start_log else -1
+                duration = (end_time - start_log['start_time'].replace(tzinfo=timezone.utc)).total_seconds() if start_log else -1
 
                 db_client.db.task_logs.update_one(
                     {"celery_task_id": task_id},
@@ -101,7 +109,8 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
                         "status": final_status,
                         "end_time": end_time,
                         "duration_seconds": round(duration, 2),
-                        "error_message": error_msg
+                        "error_message": error_msg,
+                        "api_total_counts": api_total_counts # --- [NEW] Lưu vào DB ---
                     }}
                 )
         except Exception as e:
@@ -219,7 +228,8 @@ def run_report_job(context: Dict[str, Any]):
                 db_client.save_flattened_reports(
                     collection_name=collection_name,
                     data=data_to_save_in_db,
-                    user_email=user_email
+                    user_email=user_email,
+                    api_usage = reporter.api_usage
                 )
             else:
                 logger.info("Không có dữ liệu mới nào thuộc tháng trọn vẹn để lưu vào DB.")
@@ -241,8 +251,10 @@ def run_report_job(context: Dict[str, Any]):
             "job_id": job_id, 
             "task_id": task_id,
             "status": "COMPLETED", 
-            "message": final_message 
+            "message": final_message
         }
+        
+        
 
     except TaskCancelledException:
         logger.warning(f"[Job ID: {job_id}] Task was cancelled by user.")
@@ -263,6 +275,14 @@ def run_report_job(context: Dict[str, Any]):
         logger.info(f"[Job ID: {job_id}] Sending final data sheet_ID: {spreadsheet_id}")
         send_progress_update(callback_payload["status"], callback_payload["message"])
         logger.info(f"[Job ID: {job_id}] Final callback sent successfully.")
+        
+        current_api_usage = reporter.api_usage if reporter else {}
+        
+        return {
+            "status": "COMPLETED",
+            "message": final_message,
+            "api_usage": current_api_usage  
+        }
     except requests.exceptions.RequestException as e:
         logger.error(f"[Job ID: {job_id}] Failed to send final callback: {e}", exc_info=True)
         raise

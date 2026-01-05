@@ -3,69 +3,163 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Celery Task Dashboard</title>
+    <title>CMS - App DB Connector</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <div class="container">
-        <h1>Tiktok GMV Max Dashboard</h1>
-
-        <div class="summary-cards">
-            <div class="card">
-                <h2>Total Tasks</h2>
-                <p id="total-tasks">Loading...</p>
+    <div class="app-wrapper">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>CMS TOOL</h3>
+                <p>App DB Connector</p>
             </div>
-            <div class="card">
-                <h2>Successful Tasks</h2>
-                <p id="successful-tasks">Loading...</p>
-            </div>
-            <div class="card">
-                <h2>Success Rate</h2>
-                <p id="success-rate">Loading...</p>
-            </div>
-            <div class="card">
-                <h2>Avg Duration</h2>
-                <p id="avg-duration">Loading...</p>
-            </div>
-        </div>
-
-        <div class="stats-grid">
-            <div class="chart-container">
-                <h2>Task Status Breakdown</h2>
-                <canvas id="statusChart"></canvas>
-            </div>
-            <div class="api-totals">
-                <h2>API Call Totals</h2>
-                <ul id="api-totals-list">
+            <nav class="sidebar-nav">
+                <ul>
+                    <li class="active"><a href="#"><i class="fas fa-home"></i> Dashboard</a></li>
+                    <li><a href="#"><i class="fas fa-database"></i> Data Source</a></li>
+                    <li><a href="#"><i class="fas fa-cog"></i> Settings</a></li>
                     </ul>
-            </div>
-        </div>
-        
-        <div class="chart-section">
-            <h2>API Calls per Hour (Last 24h)</h2>
-            <canvas id="apiUsageChart"></canvas>
-        </div>
+            </nav>
+        </aside>
 
-        <div class="table-section">
-            <h2>Recent Tasks</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Job ID</th>
-                        <th>Task Type</th>
-                        <th>User Email</th>
-                        <th>Status</th>
-                        <th>Start Time</th>
-                        <th>End Time</th>
-                        <th>Duration (s)</th>
-                        <th>Error Message</th>
-                    </tr>
-                </thead>
-                <tbody id="tasks-table-body">
-                </tbody>
-            </table>
-        </div>
+        <main class="main-content">
+            <header class="top-bar">
+                <h2>Server Tiktok GMV Monitoring</h2>
+                <div class="controls">
+                    <label for="date-range">Date Range:</label>
+                    <select id="date-range">
+                        <option value="24h">Last 24 Hours</option>
+                        <option value="7d" selected>Last 7 Days</option>
+                        <option value="30d">Last 30 Days</option>
+                        <option value="all">All Time</option>
+                    </select>
+                    <button id="refresh-btn"><i class="fas fa-sync-alt"></i></button>
+                </div>
+            </header>
+
+            <div class="dashboard-content">
+                <div class="summary-cards">
+                    <div class="card">
+                        <div class="card-icon green"><i class="fas fa-tasks"></i></div>
+                        <div class="card-info">
+                            <h3>Total Tasks</h3>
+                            <p id="total-tasks">Loading...</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon blue"><i class="fas fa-check-circle"></i></div>
+                        <div class="card-info">
+                            <h3>Successful</h3>
+                            <p id="successful-tasks">Loading...</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon orange"><i class="fas fa-chart-line"></i></div>
+                        <div class="card-info">
+                            <h3>Success Rate</h3>
+                            <p id="success-rate">Loading...</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon purple"><i class="fas fa-envelope"></i></div>
+                        <div class="card-info">
+                            <h3>Total Emails</h3>
+                            <p id="total-emails">Loading...</p>
+                            <!-- <small>Tasks sent via email</small> -->
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon grey"><i class="fas fa-clock"></i></div>
+                        <div class="card-info">
+                            <h3>Avg Duration</h3>
+                            <p id="avg-duration">Loading...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-row-3">
+                    
+                    <div class="chart-container">
+                        <h3>Task Status Breakdown</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="statusChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-container">
+                        <h3>Task Type Breakdown</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="endpointChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="chart-container" style="display: flex; flex-direction: column; height: 100%; min-height: 350px;">
+                        <h3>API Call Totals</h3>
+                        
+                        <div style="display: flex; justify-content: space-between; padding: 0 20px 10px 20px; color: #7f8c8d; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid #eee; margin-bottom: 10px;">
+                            <span>Endpoint / Task Type</span>
+                            <span style="min-width: 80px; text-align: right;">Count</span>
+                        </div>
+
+                        <div class="api-list-wrapper" style="flex-grow: 1; overflow-y: auto;">
+                            <ul id="api-totals-list">
+                                </ul>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="grid-row-2-bias">
+                    <div class="chart-container">
+                        <h3>Top Users by Task Volume</h3>
+                        <div class="chart-wrapper-wide">
+                            <canvas id="userChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="table-container small-table">
+                        <h3>Top Users Detail</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User Email</th>
+                                    <th>Tasks</th>
+                                </tr>
+                            </thead>
+                            <tbody id="top-users-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="chart-section">
+                    <h3>API Calls Timeline</h3>
+                    <div class="chart-wrapper-timeline">
+                        <canvas id="apiUsageChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h3>Recent Tasks Log</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Task Type</th>
+                                <th>User Email</th>
+                                <th>Status</th>
+                                <th>Start Time</th>
+                                <th>End Time</th>
+                                <th>Duration (s)</th>
+                                <th>Error Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tasks-table-body">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
     </div>
 
     <script src="/static/script.js"></script>

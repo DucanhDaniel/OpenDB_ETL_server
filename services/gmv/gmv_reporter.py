@@ -6,6 +6,7 @@ from calendar import monthrange
 from ..exceptions import TaskCancelledException
 from concurrent.futures import ThreadPoolExecutor
 from ..rate_limiter.rate_limiter import RedisRateLimiter
+from collections import defaultdict
 
 class GMVReporter:
     
@@ -43,6 +44,8 @@ class GMVReporter:
         self.job_id = job_id
         self.redis_client = redis_client
         self.cancel_key = f"job:{self.job_id}:cancel_requested" if self.job_id else None
+        
+        self.api_usage = defaultdict(int)
         
         if self.redis_client:
             gmv_rules = [
@@ -172,6 +175,9 @@ class GMVReporter:
         raise Exception("Hết số lần thử, vui lòng kiểm tra kết nối hoặc trạng thái API và thử lại sau.")
 
     def log_api_counter(self, url):
+        
+        self.api_usage[url] += 1
+            
         if self.redis_client:
                 try:
                     api_call_key = f"api_calls_total:{url}"

@@ -20,7 +20,7 @@ class MongoDbClient:
         
         self._ensure_indexes()
 
-    def save_flattened_reports(self, collection_name: str, data: List[Dict[str, Any]], user_email: str):
+    def save_flattened_reports(self, collection_name: str, data: List[Dict[str, Any]], user_email: str, api_usage: dict):
         """
         Lưu dữ liệu đã được làm phẳng vào một collection được chỉ định.
         Mỗi `row` trong `data` đã là một dict hoàn chỉnh.
@@ -48,7 +48,8 @@ class MongoDbClient:
             document_to_save = {
                 **row,
                 "user_email": user_email,
-                "updated_at": datetime.utcnow()
+                "updated_at": datetime.utcnow(),
+                "api_usage": api_usage
             }
             
             operations.append(

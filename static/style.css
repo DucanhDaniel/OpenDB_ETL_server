@@ -1,35 +1,102 @@
+/* style.css */
+:root {
+    --sidebar-width: 260px;
+    --primary-color: #4CAF50;
+    --bg-light: #f4f7f6;
+    --text-dark: #2c3e50;
+    --white: #ffffff;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     margin: 0;
-    padding: 20px;
-    background-color: #f4f7f6;
+    padding: 0;
+    background-color: var(--bg-light);
     color: #333;
-    line-height: 1.6;
 }
 
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-    background-color: #fff;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+/* --- LAYOUT --- */
+.app-wrapper {
+    display: flex;
+    min-height: 100vh;
 }
 
-h1 {
+/* Sidebar */
+.sidebar {
+    width: var(--sidebar-width);
+    background-color: #2c3e50;
+    color: #ecf0f1;
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    height: 100%;
+    left: 0;
+    top: 0;
+}
+
+.sidebar-header {
+    padding: 20px;
+    background-color: #1a252f;
     text-align: center;
-    color: #2c3e50;
-    margin-bottom: 30px;
 }
 
-h2 {
-    color: #34495e;
-    border-bottom: 2px solid #ecf0f1;
-    padding-bottom: 10px;
-    margin-top: 40px;
-    margin-bottom: 20px;
+.sidebar-header h3 { margin: 0; font-size: 1.2rem; }
+.sidebar-header p { margin: 5px 0 0; font-size: 0.8rem; opacity: 0.7; }
+
+.sidebar-nav ul { list-style: none; padding: 0; margin: 20px 0; }
+.sidebar-nav li a {
+    display: block;
+    padding: 15px 25px;
+    color: #bdc3c7;
+    text-decoration: none;
+    transition: 0.3s;
+    border-left: 4px solid transparent;
+}
+.sidebar-nav li a:hover, .sidebar-nav li.active a {
+    background-color: #34495e;
+    color: #fff;
+    border-left-color: var(--primary-color);
+}
+.sidebar-nav li a i { margin-right: 10px; width: 20px; text-align: center; }
+
+/* Main Content */
+.main-content {
+    margin-left: var(--sidebar-width);
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    width: calc(100% - var(--sidebar-width));
 }
 
+.top-bar {
+    background-color: var(--white);
+    padding: 15px 30px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+.top-bar h2 { margin: 0; font-size: 1.5rem; color: var(--text-dark); }
+
+.controls { display: flex; align-items: center; gap: 15px; }
+.controls select {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    outline: none;
+}
+#refresh-btn {
+    background: none; border: none; cursor: pointer; font-size: 1.2rem; color: #666;
+    transition: transform 0.3s;
+}
+#refresh-btn:hover { color: var(--primary-color); transform: rotate(180deg); }
+
+.dashboard-content { padding: 30px; }
+
+/* --- SUMMARY CARDS --- */
 .summary-cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -38,181 +105,219 @@ h2 {
 }
 
 .card {
-    background-color: #e8f5e9;
+    background-color: var(--white);
     padding: 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
-    text-align: center;
-    transition: transform 0.2s ease-in-out;
-}
-
-.card:hover {
-    transform: translateY(-5px);
-}
-
-.card h2 {
-    font-size: 1.2em;
-    color: #2e7d32;
-    margin-top: 0;
-    border-bottom: none;
-    padding-bottom: 0;
-}
-
-.card p {
-    font-size: 2em;
-    font-weight: bold;
-    color: #1b5e20;
-    margin: 10px 0 0;
-}
-
-.stats-grid {
-    display: grid;
-    /* THAY ĐỔI: Chia đều không gian 1:1 thay vì 2:1 */
-    grid-template-columns: 1fr 1fr;
-    gap: 30px;
-    /* THAY ĐỔI: Căn giữa các item theo chiều dọc cho cân đối hơn */
-    align-items: start; 
-    margin-bottom: 30px;
-}
-
-.chart-container, .api-totals {
-    background-color: #fdfdfd;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
-}
-
-
-.chart-section {
-    background-color: #fdfdfd;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
-    margin-bottom: 30px;
-}
-
-.api-totals h2, .chart-section h2, .chart-container h2 {
-    text-align: center;
-    border-bottom: none;
-}
-
-
-.api-totals ul {
-    list-style-type: none;
-    padding: 0;
-}
-
-.api-totals li {
-    background-color: #f9f9f9;
-    padding: 10px;
-    border-radius: 4px;
-    margin-bottom: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     display: flex;
-    justify-content: space-between;
-    font-size: 0.9em;
-    border-left: 3px solid #4CAF50;
-    padding-left: 15px;
+    align-items: center;
+    gap: 15px;
+}
+.card-icon {
+    width: 50px; height: 50px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem; color: white;
+}
+.card-icon.green { background-color: #2ecc71; }
+.card-icon.blue { background-color: #3498db; }
+.card-icon.orange { background-color: #e67e22; }
+.card-icon.purple { background-color: #9b59b6; }
+.card-icon.grey { background-color: #95a5a6; }
+
+.card-info h3 { margin: 0; font-size: 0.9rem; color: #7f8c8d; font-weight: normal; }
+.card-info p { margin: 5px 0 0; font-size: 1.6rem; font-weight: bold; color: var(--text-dark); }
+.card-info small { font-size: 0.75rem; color: #bdc3c7; }
+
+/* --- CHARTS & GRIDS --- */
+.grid-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 30px;
+}
+.grid-row-2-bias {
+    display: grid;
+    grid-template-columns: 2fr 1fr; /* User chart to hơn table */
+    gap: 20px;
+    margin-bottom: 30px;
 }
 
-.api-totals li span {
-    font-weight: bold;
-    color: #333;
-}
-
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 20px;
-    background-color: #fff;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+.chart-container, .chart-section, .table-container, .table-section {
+    background: var(--white);
+    padding: 20px;
     border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.chart-container h3, .chart-section h3, .table-container h3, .table-section h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    font-size: 1.1rem;
+    color: var(--text-dark);
+    border-left: 4px solid var(--primary-color);
+    padding-left: 10px;
+}
+.chart-wrapper { position: relative; height: 250px; display: flex; justify-content: center; }
+.chart-wrapper-wide { position: relative; height: 300px; }
+
+/* --- TABLES --- */
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.9rem; }
+thead th { background-color: #f8f9fa; color: #2c3e50; font-weight: 600; position: sticky; top: 0; }
+tbody tr:hover { background-color: #f1f2f6; }
+
+.small-table { max-height: 360px; overflow-y: auto; }
+
+/* Table Section (Main Log) */
+.table-section { max-height: 600px; overflow-y: auto; }
+.table-section thead th { z-index: 10; background-color: var(--white); box-shadow: 0 1px 0 #ddd; }
+
+/* Status Colors */
+.status-SUCCESS { color: #27ae60; font-weight: bold; }
+.status-FAILED { color: #c0392b; font-weight: bold; }
+.status-STARTED { color: #2980b9; font-weight: bold; }
+.status-TIMED_OUT { color: #7f8c8d; font-weight: bold; }
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .grid-row-2, .grid-row-2-bias { grid-template-columns: 1fr; }
+    .sidebar { width: 60px; overflow: hidden; }
+    .sidebar-header h3, .sidebar-header p, .sidebar-nav span { display: none; }
+    .main-content { margin-left: 60px; width: calc(100% - 60px); }
+    .sidebar-nav li a { text-align: center; padding: 15px 0; }
+    .sidebar-nav li a i { margin: 0; font-size: 1.2rem; }
+}
+
+.chart-wrapper-timeline {
+    position: relative;
+    height: 400px; 
+    width: 100%;
     overflow: hidden;
 }
 
-th, td {
-    padding: 12px 15px;
-    text-align: left;
-    border-bottom: 1px solid #ddd;
+.table-wrapper-small {
+    max-height: 150px; /* Giới hạn chiều cao, nếu dài quá sẽ cuộn */
+    overflow-y: auto;
+    border-top: 1px solid #eee;
+    margin-top: 10px;
 }
 
-thead th {
-    background-color: #4CAF50;
-    color: white;
-    font-weight: bold;
+.simple-table {
+    width: 100%;
+    border-collapse: collapse;
 }
 
-tbody tr:nth-child(even) {
-    background-color: #f9f9f9;
+.simple-table th, .simple-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid #f1f1f1;
+    font-size: 0.85rem; /* Chữ nhỏ hơn bảng chính một chút */
 }
 
-tbody tr:hover {
-    background-color: #f1f1f1;
+.simple-table th {
+    background-color: #fff;
+    color: #7f8c8d;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
 }
 
-td {
-    font-size: 0.9em;
-    word-break: break-word;
+.simple-table td strong {
+    color: var(--primary-color);
 }
 
-/* Cột 1 (Job ID) và Cột 4 (Status) */
-th:nth-child(1), td:nth-child(1),
-th:nth-child(4), td:nth-child(4) {
-    white-space: nowrap; /* Ngăn không cho chữ bị xuống dòng */
+#api-totals-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    width: 100%;
 }
 
-th:nth-child(1), td:nth-child(1) { /* Cột Job ID */
-    width: 10%;
-}
-
-th:nth-child(4), td:nth-child(4) { /* Cột Status */
-    width: 10%;
-}
-
-
-/* Status specific styling */
-.status-SUCCESS {
-    color: #28a745; /* Green */
-    font-weight: bold;
-}
-.status-FAILED {
-    color: #dc3545; /* Red */
-    font-weight: bold;
-}
-.status-CANCELLED, .status-STOPPED {
-    color: #ffc107; /* Yellow/Orange */
-    font-weight: bold;
-}
-.status-TIMED_OUT {
-    color: #6c757d; /* Grey */
-    font-weight: bold;
-}
-.status-STARTED {
-    color: #007bff; /* Blue */
-    font-weight: bold;
-}
-
-
-.table-section {
-    max-height: 500px; /* Bắt buộc: Phải có chiều cao giới hạn */
-    overflow-y: auto;  /* Bắt buộc: Phải có để tạo thanh cuộn */
+#api-totals-list li {
+    background-color: #f8f9fa; /* Nền xám rất nhạt */
+    padding: 15px 20px;       /* Tăng padding để thẻ thoáng hơn */
+    margin-bottom: 10px;      /* Khoảng cách giữa các thẻ xa hơn chút */
     
-    /* Các thuộc tính khác để style cho đẹp */
+    /* Style viền và bo góc */
+    border-left: 5px solid #2ecc71; /* Viền xanh dày hơn (5px) */
+    border-radius: 4px;             /* Bo nhẹ 4 góc */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.03); /* Đổ bóng nhẹ cho nổi bật */
+    
+    /* Bố cục flex */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s ease;
+}
+
+#api-totals-list li:hover {
+    background-color: #fff;       /* Khi hover chuyển nền trắng */
+    box-shadow: 0 4px 8px rgba(0,0,0,0.08); /* Bóng đậm hơn khi hover */
+    transform: translateY(-2px);  /* Nổi lên nhẹ */
+}
+
+/* Tên API (Bên trái) */
+.api-name {
+    color: #495057;           /* Màu xám đậm vừa phải */
+    font-size: 0.95rem;       /* Cỡ chữ vừa đọc */
+    font-family: 'Segoe UI', sans-serif; /* Font hiện đại */
+    
+    /* Xử lý nếu tên quá dài */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 75%;           /* Giới hạn chiều rộng tên */
+}
+
+/* Số lượng (Bên phải) */
+.api-count {
+    color: #212529;
+    font-size: 1.1rem;
+    
+    /* --- PHẦN QUAN TRỌNG ĐỂ THẲNG HÀNG --- */
+    min-width: 110px;    /* Dành ra một khoảng rộng cố định (ví dụ 80px) cho cột số */
+    text-align: right;  /* Căn số sang phải để thẳng hàng đơn vị */
+    display: inline-block; /* Để thuộc tính width có tác dụng */
+}
+
+/* 1. Grid cha: Ép các cột con phải giãn chiều cao bằng nhau */
+.grid-row-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 30px;
+    align-items: stretch; /* QUAN TRỌNG: Lệnh này ép các cột bằng nhau */
+}
+
+/* 2. Thẻ Card con: Chiếm 100% chiều cao mà Grid cấp cho */
+.chart-container {
+    background: #fff;
+    padding: 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.03);
-    border: 1px solid #eee;
-}
-
-thead th {
-    position: sticky;  /* Bắt buộc: Bật tính năng "dính" */
-    top: 0;            /* Bắt buộc: Dính ở cạnh trên cùng của khu vực cuộn */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     
-    /* Các thuộc tính khác để đảm bảo hiển thị đúng */
-    background-color: #4CAF50; /* Bắt buộc: Che đi nội dung cuộn bên dưới */
-    z-index: 10;       /* Đảm bảo header luôn nằm trên */
+    /* Setup Flexbox để nội dung bên trong (Header, Chart, List) dãn đều */
+    height: 100%; 
+    display: flex;
+    flex-direction: column; 
+    box-sizing: border-box; /* Đảm bảo padding không làm vỡ layout */
 }
 
-.table-section h2 {
-    text-align: center;
-    border-bottom: none; /* Tùy chọn: bỏ gạch chân cho đẹp hơn khi căn giữa */
+/* 3. Phần chứa biểu đồ/danh sách: Tự động chiếm khoảng trống còn thừa */
+.chart-wrapper, 
+.api-list-wrapper {
+    flex-grow: 1; /* Đẩy nội dung dãn ra hết khoảng trắng còn lại */
+    position: relative;
+    width: 100%;
+}
+
+/* Tùy chỉnh thêm cho list để có thanh cuộn nếu cần */
+.api-list-wrapper {
+    overflow-y: auto;
+    min-height: 0; /* Fix lỗi scroll trên Firefox/Flexbox */
+}
+
+/* Responsive: Màn hình nhỏ thì gộp lại thành 1 cột */
+@media (max-width: 1200px) {
+    .grid-row-3 {
+        grid-template-columns: 1fr;
+    }
 }

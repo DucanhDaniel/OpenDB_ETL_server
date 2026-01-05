@@ -80,6 +80,7 @@ class GoogleSheetWriter:
     def write_data(self, data_to_write: list, headers: list, options: dict) -> int:
         """
         Hàm chính để ghi dữ liệu vào sheet, xử lý cả overwrite và append.
+        Tự động mở rộng cột nếu dữ liệu vượt quá giới hạn lưới (Grid limits).
         """
         sheet_name = options.get('sheetName')
         is_overwrite = options.get('isOverwrite', False)
@@ -96,6 +97,14 @@ class GoogleSheetWriter:
 
         worksheet = self._get_or_create_worksheet(sheet_name)
         
+        # --- LOGIC MỚI: Đảm bảo đủ số cột cho headers ngay từ đầu ---
+        # Kiểm tra nếu số lượng headers cần ghi lớn hơn số cột hiện có của sheet
+        if len(headers) > worksheet.col_count:
+            cols_to_add = len(headers) - worksheet.col_count
+            print(f"Sheet đang thiếu {cols_to_add} cột. Đang thêm cột mới...")
+            worksheet.add_cols(cols_to_add)
+        # ------------------------------------------------------------
+
         is_sheet_empty = worksheet.row_count == 0 or (worksheet.get('A1') is None)
 
         # ---- XỬ LÝ GHI ĐÈ (OVERWRITE) ----
@@ -107,14 +116,14 @@ class GoogleSheetWriter:
                 return 0
 
             # Chuyển đổi list of dicts thành list of lists
-            # rows = [list(headers)] + [[row.get(h, '') for h in headers] for row in data_to_write]
             rows_data = [
                 [self._create_image_formula(row.get(h, '')) if h == 'product_img' else row.get(h, '') for h in headers]
                 for row in data_to_write
             ]
             rows = [list(headers)] + rows_data
             
-            worksheet.update(range_name = 'A1', values = rows, value_input_option='USER_ENTERED')
+            # Vì đã add_cols ở trên nên lệnh này sẽ không bị lỗi 400 Grid limits nữa
+            worksheet.update(range_name='A1', values=rows, value_input_option='USER_ENTERED')
             
             # Định dạng header
             worksheet.format("1:1", {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
@@ -129,14 +138,23 @@ class GoogleSheetWriter:
             
         existing_headers = worksheet.row_values(1)
         new_headers_to_add = [h for h in headers if h not in existing_headers]
+        
+        final_headers = existing_headers + new_headers_to_add
+
+        # --- LOGIC MỚI CHO APPEND: Kiểm tra lại tổng số cột sau khi gộp header cũ và mới ---
+        # Nếu có header mới, tổng số cột sẽ tăng lên, cần kiểm tra lại lần nữa
+        if len(final_headers) > worksheet.col_count:
+            cols_to_add = len(final_headers) - worksheet.col_count
+            print(f"Phát hiện thêm cột mới trong chế độ Append. Đang thêm {cols_to_add} cột...")
+            worksheet.add_cols(cols_to_add)
+        # -----------------------------------------------------------------------------------
 
         if new_headers_to_add:
-            print(f"Phát hiện cột mới: {new_headers_to_add}. Đang thêm vào sheet...")
+            print(f"Phát hiện cột mới: {new_headers_to_add}. Đang thêm header vào sheet...")
             start_col = len(existing_headers) + 1
+            # Cập nhật header mới vào các ô tiếp theo
             worksheet.update(range_name=gspread.utils.rowcol_to_a1(1, start_col), values=[new_headers_to_add], value_input_option='USER_ENTERED')
             worksheet.format(f"1:1", {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
-
-        final_headers = existing_headers + new_headers_to_add
         
         # Chuyển đổi list of dicts thành list of lists theo đúng thứ tự của final_headers
         rows_to_append = [
@@ -202,7 +220,7 @@ class GoogleSheetWriter:
 if __name__ == '__main__':
     # --- Cấu hình để test ---
     CREDENTIALS_FILE = 'db-connector-v1-b12681524556.json'
-    SPREADSHEET_ID = '17Oa459U4lSiE_WmhVkwtkPpKFj_SAGXk0DMTA1fsJW8'
+    SPREADSHEET_ID = '1tIKnATQ5886Kguu8AUbZ9XVU1Xww0wa4ido5ELbh0LQ'
 
     # --- Chuẩn bị dữ liệu mẫu ---
     sample_headers = ['campaign_id', 'spend', 'orders', 'ghi_chu', 'product_img']
