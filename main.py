@@ -2,7 +2,9 @@ from fastapi import FastAPI, HTTPException
 import logging
 from typing import Optional, List, Dict
 import redis
-from celery_worker import run_report_job
+# from celery_worker import run_report_job
+from workers.tasks_modular import run_report_job
+
 from models.schemas import CreateJobRequest
 from fastapi.middleware.cors import CORSMiddleware
 from services.database.mongo_client import MongoDbClient
@@ -10,13 +12,18 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 import os 
 from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+
+load_dotenv()
 
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
+REDIS_HOST = os.getenv('REDIS_HOST')
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 app = FastAPI(title="TikTok Reporting API", version="2.0.0")
 db_client = MongoDbClient()
-redis_client = redis.Redis(host='redis', port=6379, db=0, password=REDIS_PASSWORD, decode_responses=True)
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=0, password=REDIS_PASSWORD, decode_responses=True)
 
 app.add_middleware(
     CORSMiddleware,

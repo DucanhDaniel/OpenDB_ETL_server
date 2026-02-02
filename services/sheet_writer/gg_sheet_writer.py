@@ -172,8 +172,8 @@ class GoogleSheetWriter:
         Ghi log tiến trình vào một sheet riêng biệt có tên là task_id.
         """
         try:
-            # Lấy hoặc tạo một sheet có tên là task_id
-            worksheet = self._get_or_create_worksheet(task_id)
+            # Lấy hoặc tạo một sheet có tên là CURRENT_TASK_STATUS
+            worksheet = self._get_or_create_worksheet('CURRENT_TASK_STATUS')
 
             if not worksheet._properties.get('hidden', False):
                 body = {
@@ -195,8 +195,8 @@ class GoogleSheetWriter:
             # Dữ liệu cần ghi: status, progress, message, và timestamp
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             data = [
-                ['status', 'progress', 'message', 'last_updated'],
-                [status, progress, message, timestamp]
+                ['task_id', 'status', 'progress', 'message', 'last_updated'],
+                [task_id, status, progress, message, timestamp]
             ]
             
             # Ghi đè vào các ô đầu tiên của sheet

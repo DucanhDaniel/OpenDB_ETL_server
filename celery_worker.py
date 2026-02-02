@@ -16,12 +16,13 @@ from services.database.mongo_client import MongoDbClient
 from datetime import date, datetime, timedelta, timezone
 
 REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
+REDIS_HOST = os.getenv('REDIS_HOST')
 CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
 
 celery_app = Celery(
     'tasks', 
-    broker=f'redis://:{REDIS_PASSWORD}@redis:6379/0', 
-    backend=f'redis://:{REDIS_PASSWORD}@redis:6379/0'
+    broker=f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0', 
+    backend=f'redis://:{REDIS_PASSWORD}@{REDIS_HOST}:6379/0'
 )
 
 celery_app.conf.update(
@@ -35,7 +36,7 @@ celery_app.conf.update(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 redis_client = redis.Redis(
-    host='redis', 
+    host=REDIS_HOST, 
     port=6379, 
     db=0, 
     password=REDIS_PASSWORD, 
@@ -110,7 +111,7 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
                         "end_time": end_time,
                         "duration_seconds": round(duration, 2),
                         "error_message": error_msg,
-                        "api_total_counts": api_total_counts # --- [NEW] Lưu vào DB ---
+                        "api_total_counts": api_total_counts 
                     }}
                 )
         except Exception as e:
