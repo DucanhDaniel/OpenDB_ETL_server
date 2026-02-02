@@ -59,6 +59,23 @@ services:
     depends_on:
       - redis 
 
+  facebook_batch_server:
+    image: phamducanh2k5/fb_batch_request_server:latest
+    container_name: facebook_batch_server
+    ports:
+      - "8010:8010" # ONLY FOR TESTING PURPOSES
+    environment:
+      - LOG_DIR=/app/logs
+    volumes:
+      - ./logs:/app/logs
+      - ./static:/app/static
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8010/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   mongo-data:
   redis-data:

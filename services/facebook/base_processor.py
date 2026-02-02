@@ -25,7 +25,7 @@ class FacebookAdsBaseReporter:
     
     # Constants
     API_VERSION = "v24.0"
-    BATCH_API_URL = "http://103.102.131.30:8010/batch"  # FastAPI endpoint
+    BATCH_API_URL = "http://facebook_batch_server:8010/batch"  # FastAPI endpoint
     MAX_BACKOFF_SECONDS = 360  # 6 phút
     DEFAULT_BATCH_SIZE = 20
     DEFAULT_SLEEP_TIME = 4  # seconds
