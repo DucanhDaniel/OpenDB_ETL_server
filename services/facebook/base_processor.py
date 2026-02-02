@@ -31,6 +31,7 @@ class FacebookAdsBaseReporter:
     DEFAULT_SLEEP_TIME = 4  # seconds
     MAX_RETRIES = 3
     MAX_PAGES_PER_RETRY = 10
+    PLUS_BACKOFF_SEC = 3 # Thời gian đệm thêm khi backoff
     
     def __init__(
         self, 
@@ -135,7 +136,7 @@ class FacebookAdsBaseReporter:
             raise Exception(error_msg)
         
         logger.warning(f"⚠ Rate limit detected. Chờ {backoff_info['backoff_seconds']}s. Lý do: {backoff_info['reason']}")
-        time.sleep(backoff_info['backoff_seconds'])
+        time.sleep(backoff_info['backoff_seconds'] + self.PLUS_BACKOFF_SEC) # Thêm đệm
         logger.info("✓ Backoff hoàn tất, tiếp tục xử lý.")
     
     # ==================== BATCH API CALLS ====================

@@ -5,8 +5,8 @@ services:
     image: mongo:latest
     container_name: my-mongo-db
     restart: always
-    ports:
-      - "127.0.0.1:27018:27017"
+    # ports:
+    #   - "127.0.0.1:27018:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: opendb_mongodb_123
@@ -26,8 +26,8 @@ services:
   redis:
     image: redis:latest
     container_name: my-redis-server
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6379:6379"
     command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
