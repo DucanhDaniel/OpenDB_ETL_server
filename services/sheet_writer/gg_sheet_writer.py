@@ -220,7 +220,7 @@ class GoogleSheetWriter:
         is_sheet_empty = worksheet.row_count == 0 or not worksheet.get('A1')
 
         # ---- OVERWRITE MODE ----
-        if is_first_chunk and (is_overwrite or is_sheet_empty):
+        if is_overwrite:
             logger.info(f"Chế độ Ghi đè. Xóa và ghi lại sheet '{sheet_name}'...")
             
             def _clear():

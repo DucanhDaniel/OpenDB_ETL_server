@@ -500,6 +500,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             try:
                 response_json = self._send_batch_request(batch_urls)
                 
+
                 if not response_json or "results" not in response_json:
                     logger.error("  ✗ Batch request failed completely. Re-queuing batch.")
                     for item in current_batch:
@@ -508,6 +509,9 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
                             queue.append(item)
                     time.sleep(5)
                     continue
+                
+                if "summary" in response_json:
+                    self._perform_backoff_if_needed(response_json["summary"])
                 
                 # Process từng result
                 for index, result in enumerate(response_json["results"]):

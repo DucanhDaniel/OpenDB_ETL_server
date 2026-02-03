@@ -46,6 +46,7 @@ def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer)
     Returns:
         Success message
     """
+    logger.info(f"Context writing: {context}")
     if not spreadsheet_id:
         raise ValueError("Chưa có spreadsheet_id.")
     
@@ -57,7 +58,6 @@ def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer)
     sheet_options = {
         "sheetName": context.get("sheet_name"),
         "isOverwrite": context.get("is_overwrite", False),
-        "isFirstChunk": context.get("is_first_chunk", False)
     }
     
     # Get headers
@@ -88,7 +88,7 @@ def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer)
         logger.info(f"[Job {job_id}] Writing {total_rows} rows in chunks of {CHUNK_SIZE}")
         
         total_written = 0
-        is_first = sheet_options["isFirstChunk"]
+        is_first = True  # Always start as first chunk for this batch
         
         for i in range(0, total_rows, CHUNK_SIZE):
             chunk = flattened_data[i:i + CHUNK_SIZE]
@@ -100,7 +100,6 @@ def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer)
             # First chunk uses original options, subsequent chunks are appends
             chunk_options = {
                 **sheet_options,
-                "isFirstChunk": is_first,
                 "isOverwrite": is_first and sheet_options["isOverwrite"]
             }
             

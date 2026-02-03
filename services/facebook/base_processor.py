@@ -40,7 +40,8 @@ class FacebookAdsBaseReporter:
         api_version: str = API_VERSION,
         batch_api_url: str = BATCH_API_URL,
         email: Optional[str] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        job_id: Optional[str] = None
     ):
         """
         Khởi tạo Facebook Batch Reporter.
@@ -51,12 +52,14 @@ class FacebookAdsBaseReporter:
             batch_api_url: URL của FastAPI batch endpoint
             email: Email để tracking (optional)
             progress_callback: Callback function để report progress (optional)
+            job_id: Job ID để tracking log (optional)
         """
         self.access_token = access_token
         self.api_version = api_version
         self.batch_api_url = batch_api_url
         self.email = email or "unknown@example.com"
         self.progress_callback = progress_callback
+        self.job_id = job_id
         
         # Stats
         self.total_rows_written = 0
@@ -66,7 +69,10 @@ class FacebookAdsBaseReporter:
         """Report progress nếu có callback"""
         if self.progress_callback:
             self.progress_callback(status = "RUNNING", message = message, progress = percentage)
-        logger.info(message)
+        
+        # Log with job_id prefix if available
+        prefix = f"[Job {self.job_id}] " if self.job_id else ""
+        logger.info(f"{prefix}{message}")
     
     # ==================== RATE LIMIT BACKOFF ====================
     
@@ -134,11 +140,14 @@ class FacebookAdsBaseReporter:
                 f"Lý do: {backoff_info['reason']}"
             )
             logger.error(error_msg)
+            self._report_progress(message = error_msg)
             raise Exception(error_msg)
         
         logger.warning(f"⚠ Rate limit detected. Chờ {backoff_info['backoff_seconds']}s. Lý do: {backoff_info['reason']}")
-        time.sleep(backoff_info['backoff_seconds'] + self.PLUS_BACKOFF_SEC) # Thêm đệm
+        self._report_progress(message = f"⚠ Rate limit detected. Chờ {backoff_info['backoff_seconds']}s. Lý do: {backoff_info['reason']}")
+        time.sleep(backoff_info['backoff_seconds'] + self.PLUS_BACKOFF_SEC) 
         logger.info("✓ Backoff hoàn tất, tiếp tục xử lý.")
+        self._report_progress(message = "✓ Backoff hoàn tất, tiếp tục xử lý.")
     
     # ==================== BATCH API CALLS ====================
     

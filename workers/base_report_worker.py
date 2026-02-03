@@ -256,12 +256,15 @@ class BaseReportWorker(ABC):
         
         from utils.utils import write_data_to_sheet
         
+
+        logger.info(f"[Job {self.job_id}] Calling write_data_to_sheet with context keys: {list(self.context.keys())}")
+        
         return write_data_to_sheet(
-            self.job_id,
-            self.context["spreadsheet_id"],
-            self.context,
-            data,
-            self.sheet_writer
+            job_id=self.job_id,
+            spreadsheet_id=self.context["spreadsheet_id"],
+            context=self.context,
+            flattened_data=data,
+            writer=self.sheet_writer
         )
     
     def run(self) -> Dict[str, Any]:

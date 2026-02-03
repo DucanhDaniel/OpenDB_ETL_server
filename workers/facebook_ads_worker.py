@@ -123,8 +123,10 @@ class FacebookDailyWorker(FacebookAdsWorker):
         return FacebookDailyReporter(
             access_token=self.context["access_token"],
             email=self.context.get("user_email", "unknown@example.com"),
-            progress_callback=self._send_progress
+            progress_callback=self._send_progress,
+            job_id=self.job_id
         )
+
 class FacebookPerformanceWorker(FacebookAdsWorker):
     """Worker for Facebook Overview Performance reporter"""
     
@@ -133,7 +135,8 @@ class FacebookPerformanceWorker(FacebookAdsWorker):
         return FacebookPerformanceReporter(
             access_token=self.context["access_token"],
             email=self.context.get("user_email", "unknown@example.com"),
-            progress_callback=self._send_progress
+            progress_callback=self._send_progress,
+            job_id=self.job_id
         )
         
 class FacebookBreakdownWorker(FacebookAdsWorker):
@@ -144,7 +147,8 @@ class FacebookBreakdownWorker(FacebookAdsWorker):
         return FacebookBreakdownReporter(
             access_token=self.context["access_token"],
             email=self.context.get("user_email", "unknown@example.com"),
-            progress_callback=self._send_progress
+            progress_callback=self._send_progress,
+            job_id=self.job_id
         )
         
     
