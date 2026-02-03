@@ -291,7 +291,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
                 parent_info.pop("campaign", None)
             
             if item.get("adset"):
-                print(item.get("adset"))
+                # print(item.get("adset"))
                 parent_info["adset_name"] = item["adset"].get("name")
                 parent_info["adset_id"] = item["adset"].get("id")
                 if item["adset"].get("bid_strategy"):
@@ -496,7 +496,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             current_batch_rows = []
             
             logger.info(f"\n➤ Processing batch of {len(current_batch)} items. Queue remaining: {len(queue)}")
-            
+            self._report_progress(message = f"\n➤ Processing batch of {len(current_batch)} items. Queue remaining: {len(queue)}")
             try:
                 response_json = self._send_batch_request(batch_urls)
                 
@@ -571,6 +571,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
                 # Ghi data ngay sau khi xong batch
                 if current_batch_rows:
                     logger.info(f"  ✎ Writing {len(current_batch_rows)} rows from this batch...")
+                    self._report_progress(message = f"\nNhận được {len(current_batch_rows)} dòng")
                     if output_callback:
                         output_callback(current_batch_rows)
                     total_retry_written += len(current_batch_rows)

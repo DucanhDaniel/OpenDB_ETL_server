@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 import logging
 from typing import Optional, List, Dict
 import redis
-# from celery_worker import run_report_job
 from workers.tasks_modular import run_report_job
 
 from models.schemas import CreateJobRequest
@@ -38,59 +37,11 @@ async def read_root():
     return FileResponse('static/index.html')
 
 # --- API Endpoints ---
-def get_task_logs_from_db() -> List[Dict]:
-    """Lấy log tác vụ từ MongoDB."""
-    if not db_client: return []
-    tasks_cursor = db_client.db.task_logs.find({}).sort("start_time", -1).limit(10000)
-    tasks = list(tasks_cursor)
-    for task in tasks:
-        task['_id'] = str(task['_id'])
-        if task.get('start_time'): task['start_time'] = task['start_time'].isoformat() + 'Z'
-        if task.get('end_time'): task['end_time'] = task['end_time'].isoformat() + 'Z'
-    return tasks
 
-def get_api_total_counts() -> Dict[str, int]:
-    """Lấy tổng số lần gọi API từ Redis."""
-    if not redis_client: return {}
-    counts = {}
-    keys = list(redis_client.scan_iter("api_calls_total:*"))
-    if not keys: return {}
-    
-    values = redis_client.mget(keys)
-    for i, key in enumerate(keys):
-        endpoint = key.replace('api_calls_total:', '')
-        counts[endpoint] = int(values[i]) if values[i] else 0
-    return counts
-
-def get_api_timeseries_counts(endpoints: List[str], hours: int = 24) -> Dict[str, List]:
-    """Lấy dữ liệu time-series cho các endpoint được chỉ định."""
-    if not redis_client or not endpoints: return {}
-    
-    timeseries_data = {}
-    now = datetime.now(timezone.utc)
-
-    for endpoint in endpoints:
-        keys_to_fetch = []
-        timestamps = []
-        for i in range(hours):
-            target_time = now - timedelta(hours=i)
-            hour_str = target_time.strftime('%Y-%m-%d-%H')
-            keys_to_fetch.append(f"api_calls:{endpoint}:{hour_str}")
-            timestamps.append(target_time.isoformat())
-        
-        keys_to_fetch.reverse()
-        timestamps.reverse()
-        
-        values = redis_client.mget(keys_to_fetch)
-        
-        endpoint_data = [{"timestamp": ts, "count": int(val) if val else 0} for ts, val in zip(timestamps, values)]
-        timeseries_data[endpoint] = endpoint_data
-        
-    return timeseries_data
-
+from services.dashboard.dashboard_service import get_dashboard_data
 
 @app.get("/api/dashboard", tags=["Dashboard"])
-def get_dashboard_data():
+def dashboard_endpoint():
     """
     Tổng hợp và trả về tất cả dữ liệu cần thiết cho dashboard.
     """
@@ -98,17 +49,7 @@ def get_dashboard_data():
         raise HTTPException(status_code=503, detail="Database or Redis connection is unavailable.")
     
     try:
-        task_logs = get_task_logs_from_db()
-        api_total_counts = get_api_total_counts()
-        
-        endpoints_with_data = list(api_total_counts.keys())
-        api_timeseries = get_api_timeseries_counts(endpoints_with_data)
-
-        return {
-            "task_logs": task_logs,
-            "api_total_counts": api_total_counts,
-            "api_timeseries": api_timeseries
-        }
+        return get_dashboard_data(db_client, redis_client)
         
     except Exception as e:
         logger.error(f"Lỗi khi truy vấn dashboard data: {e}", exc_info=True)
