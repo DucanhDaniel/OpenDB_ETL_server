@@ -18,12 +18,32 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
     Class để lấy Daily Report từ Facebook với breakdown theo ngày.
     Hỗ trợ các level: account, campaign, adset, ad
     """
-    
+
+    # Constants cho field sanitization
+    IMPRESSION_BASED_METRICS = [
+        'spend', 'impressions', 'cpm', 'cpp', 'ctr', 'reach', 'frequency'
+    ]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.page_map = {}  # Cache for page info
-    
-    
+
+    # ==================== HELPER METHODS ====================
+
+    @staticmethod
+    def _resolve_api_field_name(header_name: str) -> str:
+        """
+        Resolve tên API field từ header name.
+        Nếu field nằm trong CONVERSION_METRICS_MAP, trả về api_field hoặc parent_field.
+        """
+        if header_name in CONVERSION_METRICS_MAP:
+            mapped = CONVERSION_METRICS_MAP[header_name]
+            return mapped.get("api_field") or mapped.get("parent_field")
+        return header_name
+
+
+    # ==================== URL CREATION ====================
+
     def _create_flat_level_url(
         self,
         account: Dict[str, str],
@@ -33,24 +53,35 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
     ) -> str:
         """
         Tạo URL cho account/campaign level (cấu trúc phẳng).
-        
+
         Returns:
             Relative URL string
         """
         level = template_config["api_params"]["level"]
-        
+        breakdowns = template_config["api_params"].get("breakdowns")
+        is_daily_report = bool(template_config["api_params"].get("time_increment"))
+
         # Build fields set
         final_fields = set()
+        has_impression_metrics = False
+
         for field in selected_fields:
+            api_field_name = self._resolve_api_field_name(field)
+
+            # --- CHECK IMPRESSION METRICS ---
+            if api_field_name in self.IMPRESSION_BASED_METRICS or field in self.IMPRESSION_BASED_METRICS:
+                has_impression_metrics = True
+
+            # --- ADD FIELD ---
             if field in CONVERSION_METRICS_MAP:
                 final_fields.add(CONVERSION_METRICS_MAP[field]["parent_field"])
             elif field in template_config.get("insight_fields", []):
                 final_fields.add(field)
-        
+
         # Add required fields
         for f in ["account_id", "account_name", "campaign_id", "campaign_name", "date_start", "date_stop"]:
             final_fields.add(f)
-        
+
         # Build params
         params = {
             **template_config["api_params"],
@@ -58,11 +89,16 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             "time_range": json.dumps({"since": chunk["start"], "until": chunk["end"]}),
             "limit": 200
         }
-        
+
+        # --- REMOVE action_report_time if has impression metrics ---
+        if has_impression_metrics and params.get("action_report_time") == "conversion":
+            logger.debug(f"  ⊗ Removing action_report_time (has impression metrics)")
+            params.pop("action_report_time", None)
+
         # Create query string
         from urllib.parse import urlencode
         query_string = urlencode(params)
-        
+
         return f"{account['id']}/insights?{query_string}"
     
     def _create_nested_level_url(
@@ -75,58 +111,79 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
     ) -> str:
         """
         Tạo URL cho adset/ad level (cấu trúc lồng nhau).
-        
+
         Returns:
             Relative URL string
         """
         object_fields_key = f"{level}_fields"
         api_object_fields = template_config.get(object_fields_key, [])
-        
+        breakdowns = template_config["api_params"].get("breakdowns")
+        is_daily_report = bool(template_config["api_params"].get("time_increment"))
+
+        # === OPTION A: Auto-load ALL template object fields ===
+        # Template config is the source of truth for object structure
         final_object_fields = set(["id", "name"])
+        for template_field in api_object_fields:
+            final_object_fields.add(template_field)
+
         final_insight_fields = set(["account_id", "date_start", "date_stop"])
-        needs_creative_fields = False
-        
-        # Process selected fields
+        has_impression_metrics = False
+
+        # Process selected fields to build insight fields only
         for field in selected_fields:
-            if field.startswith('creative_') or field == 'page_name' or field == 'actor_id':
-                needs_creative_fields = True
-            
+            api_field_name = self._resolve_api_field_name(field)
+
+            # --- CHECK IMPRESSION METRICS ---
+            if api_field_name in self.IMPRESSION_BASED_METRICS or field in self.IMPRESSION_BASED_METRICS:
+                has_impression_metrics = True
+
+            # --- ADD INSIGHT FIELD ---
             if field in CONVERSION_METRICS_MAP:
-                final_insight_fields.add(CONVERSION_METRICS_MAP[field]["parent_field"])
-            elif field in ["campaign_name", "campaign_id"]:
-                final_object_fields.add("campaign{name,id}")
-            elif level == "ad" and field in ["adset_name", "adset_id"]:
-                final_object_fields.add("adset{name,id}")
-            elif field in api_object_fields:
-                final_object_fields.add(field)
+                request_field = CONVERSION_METRICS_MAP[field].get("parent_field") or CONVERSION_METRICS_MAP[field].get("api_field")
+                if request_field:
+                    # Nếu là actions:xxx thì chỉ add "actions"
+                    if request_field.startswith("actions:"):
+                        final_insight_fields.add("actions")
+                    else:
+                        final_insight_fields.add(request_field)
             elif field in template_config.get("insight_fields", []):
                 final_insight_fields.add(field)
-        
-        # Add creative fields if needed
-        if needs_creative_fields and level == "ad":
-            creative_field = next((f for f in api_object_fields if f.startswith("creative{")), None)
-            if creative_field:
-                final_object_fields.add(creative_field)
-        
+
         # Build fields string with insights
         time_range_param = f"time_range({{'since':'{chunk['start']}','until':'{chunk['end']}'}})"
         insight_fields_str = ",".join(final_insight_fields)
         fields_str = ",".join(final_object_fields)
-        
+
+        # Build insight function string conditionally
         time_increment = template_config["api_params"].get("time_increment", 1)
-        fields_str += f",insights.{time_range_param}.time_increment({time_increment}){{{insight_fields_str}}}"
-        
+        insight_func_str = f"insights.{time_range_param}.time_increment({time_increment})"
+
+        # Add action_report_time if exists and NOT has impression metrics
+        action_report_time = template_config["api_params"].get("action_report_time")
+        if action_report_time:
+            if not has_impression_metrics or action_report_time != "conversion":
+                insight_func_str += f".action_report_time({action_report_time})"
+            else:
+                logger.debug(f"  ⊗ Skipping action_report_time (has impression metrics)")
+
+        # Add breakdowns if exists
+        if breakdowns:
+            breakdowns_str = ','.join(breakdowns) if isinstance(breakdowns, list) else breakdowns
+            insight_func_str += f".breakdowns({breakdowns_str})"
+
+        fields_str += f",{insight_func_str}{{{insight_fields_str}}}"
+
         # Build params
         params = {"fields": fields_str, "limit": 200}
-        
+
         # Add effective_status filter
         status_filter = EFFECTIVE_STATUS_FILTERS.get(level)
         if status_filter:
             params["effective_status"] = json.dumps(status_filter)
-        
+
         from urllib.parse import urlencode
         query_string = urlencode(params, safe='{}(),')
-        
+
         return f"{account['id']}/{level}s?{query_string}"
     
     def _prepare_initial_requests(
@@ -175,7 +232,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
         extracted_rows = []
         daily_insights = response_body.get("data", [])
         level = request_metadata["level"]
-        
+        # print(daily_insights)
         for daily_data in daily_insights:
             final_row = {
                 **daily_data,
@@ -215,10 +272,12 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             # Process creative fields
             if item.get("creative"):
                 creative = item["creative"]
+                # print(creative)
                 parent_info["creative_id"] = creative.get("id", "")
                 parent_info["actor_id"] = str(creative.get("actor_id", ""))
                 parent_info["page_name"] = self.page_map.get(str(creative.get("actor_id", "")), "Page không xác định")
                 parent_info["creative_title"] = creative.get("title", "")
+                parent_info["creative_name"] = creative.get("name", "")
                 parent_info["creative_body"] = creative.get("body", "")
                 parent_info["creative_thumbnail_url"] = f"=IMAGE(\"{creative.get('thumbnail_url', '')}\")" if creative.get('thumbnail_url') else ""
                 parent_info["creative_thumbnail_raw_url"] = creative.get("thumbnail_url", "")
@@ -232,8 +291,14 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
                 parent_info.pop("campaign", None)
             
             if item.get("adset"):
+                print(item.get("adset"))
                 parent_info["adset_name"] = item["adset"].get("name")
                 parent_info["adset_id"] = item["adset"].get("id")
+                if item["adset"].get("bid_strategy"):
+                    parent_info["adset_bid_strategy"] = item["adset"]["bid_strategy"]
+                bid = item["adset"].get("bid_amount") or item["adset"].get("daily_budget") or item["adset"].get("lifetime_budget")
+                if bid:
+                    parent_info["adset_bid_amount"] = bid
                 parent_info.pop("adset", None)
             
             # Combine with insights data
@@ -262,7 +327,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
         
         logger.info(f"Xử lý {len(all_responses)} responses...")
         
-        # write_to_file(f"debug_wave_{int(time.time())}.json", all_responses) # Debug
+        # write_to_file(f"data/debug/debug_wave_{int(time.time())}.json", all_responses) # Debug
         
         for response in all_responses:
             request_metadata = response["metadata"]
@@ -271,6 +336,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             # --- HANDLE ERRORS ---
             if response["status_code"] != 200:
                 logger.warning(f"  ✗ Request thất bại (Code: {response['status_code']})")
+                print(response)
                 if 500 <= response["status_code"] < 600:
                     failed_requests.append({
                         "url": response["original_url"],
@@ -664,21 +730,21 @@ if __name__ == "__main__":
     )
     
     # Template config example
-    template_name = "Ad Creative Daily Report"
+    template_name = "AGE & GENDER_DETAILED_REPORT"
     accounts = [
-        {"id": "act_650248897235348", "name": "25. Cara Luna 02 - "}
+        {"id": "act_948290596967304", "name": "25. Cara Luna 02 - "}
     ]
     
     data = reporter.get_report(
         accounts_to_process=accounts,
-        start_date="2025-12-01",
-        end_date="2025-12-01",
+        start_date="2025-12-31",
+        end_date="2025-12-31",
         template_name=template_name,
-        selected_fields=["id", "name", "adset_id", "adset_name", "campaign_id", "campaign_name", "account_id", "account_name", "date_start", "date_stop", 
-"status", "effective_status", "creative_id", "actor_id", "page_name", "creative_title", "creative_body", "creative_thumbnail_url", "creative_thumbnail_raw_url", "creative_link", 
-"spend", "impressions", "reach", "clicks", "ctr", "cpc", "cpm", "frequency", "Post engagements", "Post reactions", "Post comments", "Link clicks", "New Messaging Connections", "Cost per New Messaging", "New Messaging Connections (N)", "Cost per New Messaging (N)", "Leads", "Cost Leads", "Purchases", 
-"Cost Purchases", "Purchase Value", "Purchase ROAS", "Hoàn tất đăng ký", "Chi phí / Hoàn tất đăng ký", "ThruPlay", "Chi phí / ThruPlay", "Video Views (3s)", "Video Views (30s)", "Video Views (25%)", 
-"Video Views (50%)", "Video Views (75%)", "Video Views (100%)", "Avg Time Watched", "Video Plays"
+        selected_fields=["date_start", "date_stop", "account_id", "account_name", "campaign_name", "adset_name", "ad_name", "id", "adset_bid_strategy", "adset_bid_amount", 
+"age", "gender", "creative_id", "creative_name", "creative_thumbnail_url", "creative_link", "spend", "impressions", "reach", "clicks", 
+"cpc", "cpm", "ctr", "frequency", "inline_link_clicks", "unique_inline_link_clicks", "outbound_clicks", "unique_outbound_clicks", "inline_link_click_ctr", "outbound_click_ctr", 
+"Messaging conversations started", "New messaging contacts", "Cost per messaging conversation started", "Post engagements", "Post reactions", "Post comments", "Post saves", "Post shares", "Photo views", "Landing page views", 
+"Cost per landing page view", "ThruPlay", "Chi phí / ThruPlay", "Video Views (25%)", "Video Views (50%)", "Video Views (75%)", "Video Views (95%)", "Video Views (100%)"
 ]
     )
     
@@ -689,4 +755,4 @@ if __name__ == "__main__":
         total_spend += int(val.get("spend"))
     print("Total Spend: ", total_spend)
     
-    write_to_file("ad_daily.json", data)
+    write_to_file(f"data/{template_name}.json", data)

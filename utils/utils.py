@@ -32,37 +32,6 @@ def is_full_month(start_date_str: str, end_date_str: str) -> bool:
     except (ValueError, TypeError):
         return False
     
-# def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer):
-#     if not spreadsheet_id:
-#         raise ValueError("Chưa có spreadsheet_id.")
-
-#     # Lấy các tùy chọn ghi từ context được gửi từ Apps Script
-#     sheet_options = {
-#         "sheetName": context.get("sheet_name"),
-#         "isOverwrite": context.get("is_overwrite", False),
-#         "isFirstChunk": context.get("is_first_chunk", False)
-#     }
-
-#     # Lấy selected_fields từ context
-#     selected_fields = context.get("selected_fields")
-
-#     # Ưu tiên dùng selected_fields làm headers, nếu không có thì dùng như cũ để dự phòng
-#     if selected_fields:
-#         headers = selected_fields
-#         logger.info(f"[Job ID: {job_id}] Sử dụng {len(headers)} trường đã chọn làm tiêu đề.")
-#     else:
-#         headers = list(flattened_data[0].keys())
-#         logger.warning(f"[Job ID: {job_id}] Không có selected_fields. Sử dụng tất cả {len(headers)} trường có sẵn làm tiêu đề.")
-
-#     # Ghi dữ liệu
-#     rows_written = writer.write_data(flattened_data, headers, sheet_options)
-#     final_message = f"Hoàn tất! Đã ghi {rows_written} dòng vào sheet '{sheet_options['sheetName']}'."
-#     return final_message
-
-
-
-
-
 def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer):
     """
     Ghi dữ liệu vào Google Sheet với retry mechanism và chunked writing.

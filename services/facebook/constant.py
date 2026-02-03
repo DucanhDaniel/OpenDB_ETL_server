@@ -88,11 +88,11 @@ CONVERSION_METRICS_MAP = {
    "parent_field": "cost_per_action_type",
  },
  "Checkouts Initiated": {
-   "api_field": "actions:omni_initiate_checkout",
+   "api_field": "actions:omni_initiated_checkout",
    "parent_field": "actions",
  },
  "Cost per checkout initiated": {
-   "api_field": "cost_per_action_type:omni_initiate_checkout",
+   "api_field": "cost_per_action_type:omni_initiated_checkout",
    "parent_field": "cost_per_action_type",
  }, 
   "Hoàn tất đăng ký": {
@@ -779,7 +779,7 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
          "ad_fields": [
            "id",
            "name",
-           "adset{name,id}",
+           "adset{id,name,bid_strategy,bid_amount,daily_budget,lifetime_budget}",
            "campaign{name,id}",
            "status",
            "effective_status",
@@ -862,8 +862,8 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
              "Chi phí / ThruPlay"     
            ],
          },
-         "account_fields": ["id", "name", "account_currency"],
          "insight_fields": [
+           "id", "name", "account_currency",
            "spend",
            "impressions",
            "clicks",
@@ -1116,7 +1116,7 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
          "ad_fields": [
            "id",
            "name",
-           "adset{name,id}",
+           "adset{id,name,bid_strategy,bid_amount,daily_budget,lifetime_budget}",
            "campaign{name,id}",
            "status",
            "effective_status",
@@ -1201,7 +1201,7 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
            "name",
            "status",
            "effective_status",
-           "adset{id,name}",
+           "adset{id,name,bid_strategy,bid_amount,daily_budget,lifetime_budget}",
            "campaign{id,name}",
            "creative{id,name,object_story_id,title,body,thumbnail_url,actor_id}",
          ],
@@ -1252,13 +1252,65 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
             "7.Video Views Detail": ["Video Views (3s)", "Video Views (30s)", "Video Views (25%)", "Video Views (50%)", "Video Views (75%)", "Video Views (100%)", "Avg Time Watched", "Video Plays"]
           },
           # Dùng để init request URL
-          "ad_fields": ["id", "name", "status", "effective_status", "adset{id,name}", "campaign{id,name}", "creative{id,name,object_story_id,title,body,thumbnail_url,actor_id}"],
+          "ad_fields": ["id", "name", "status", "effective_status", "adset{id,name,bid_strategy,bid_amount,daily_budget,lifetime_budget}", "campaign{id,name}", "creative{id,name,object_story_id,title,body,thumbnail_url,actor_id}"],
           "insight_fields": [ 
               "spend", "impressions", "reach", "clicks", "ctr", "cpc", "cpm", "frequency", 
               "actions", "action_values", "cost_per_action_type", "purchase_roas", 
               "video_30_sec_watched_actions", "video_thruplay_watched_actions", "cost_per_thruplay", 
               "video_p25_watched_actions", "video_p50_watched_actions", "video_p75_watched_actions", "video_p95_watched_actions", "video_p100_watched_actions", "video_avg_time_watched_actions", "video_play_actions", 
               "date_start", "date_stop"
+          ]
+        }
+      },
+      
+      {
+        "name": "AGE & GENDER_DETAILED_REPORT",
+        "config": {
+          "type": "FAD_AD_CREATIVE_DAILY", 
+          "api_params": { 
+            "level": "ad", 
+            "time_increment": 1, 
+            "breakdowns": ["age", "gender"]
+          },
+          "selectable_fields": {
+            "1. Thời gian & Tài khoản": ["date_start", "date_stop", "account_id", "account_name"],
+            "2. Thông tin Quảng cáo": [
+                "campaign_name", "adset_name", "ad_name", "id", 
+                "adset_bid_strategy", "adset_bid_amount",
+                "age", "gender" 
+            ],
+            "3. Thông tin Sáng tạo (Creative)": [
+                "creative_id", "creative_name", "creative_thumbnail_url", "creative_link"
+            ],
+            "4. Chi phí & Hiệu suất": [
+                "spend", "impressions", "reach", "clicks", "cpc", "cpm", "ctr",
+                "inline_link_clicks", "outbound_clicks", 
+                "inline_link_click_ctr", "outbound_click_ctr"
+            ],
+            "5. Messaging & Tương tác": [
+                "Messaging conversations started", "New messaging contacts", "Cost per messaging conversation started",
+                "Post engagements", "Post reactions", "Post comments", "Post saves", "Post shares", "Photo views"
+            ],
+            "6. Video & Landing Page": [
+                "Landing page views", "Cost per landing page view",
+                "ThruPlay", "Chi phí / ThruPlay", 
+                "Video Views (25%)", "Video Views (50%)", "Video Views (75%)", "Video Views (95%)", "Video Views (100%)"
+            ]
+          },
+          "ad_fields": [
+            "id", "name", "status", "effective_status", 
+            "adset{id,name,bid_strategy,daily_budget,lifetime_budget,bid_amount}", 
+            "campaign{id,name}",
+            "creative{id,name,thumbnail_url,image_url,actor_id,object_story_id,title,body}" 
+          ],
+          "insight_fields": [
+            "spend", "impressions", "reach", "clicks", "cpc", "cpm", "ctr", "frequency", "date_start", "date_stop",
+            "inline_link_clicks", "unique_inline_link_clicks", "outbound_clicks", "unique_outbound_clicks",
+            "inline_link_click_ctr", "outbound_clicks_ctr",
+            "actions", "action_values", "cost_per_action_type",
+            "video_play_actions", "video_thruplay_watched_actions",   
+            "video_p25_watched_actions", "video_p50_watched_actions", "video_p75_watched_actions", 
+            "video_p95_watched_actions", "video_p100_watched_actions"
           ]
         }
       },
@@ -1292,7 +1344,7 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
             ],
             "6. Video & Landing Page": [
                 "Landing page views", "Cost per landing page view",
-                "Video plays", "ThruPlays", "Photo views"
+                "Video Plays", "ThruPlays", "Photo views"
             ]
           },
           "ad_fields": [
