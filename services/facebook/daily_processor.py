@@ -335,7 +335,10 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             
             # --- HANDLE ERRORS ---
             if response["status_code"] != 200:
-                logger.warning(f"  ✗ Request thất bại (Code: {response['status_code']})")
+                if (response["status_code"] == 403 or response["status_code"] == 400):
+                    raise Exception(response["error"]["message"])
+                
+                self._report_progress(message=f"  ✗ Request thất bại (Code: {response['status_code']})")
                 print(response)
                 if 500 <= response["status_code"] < 600:
                     failed_requests.append({
@@ -679,11 +682,10 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
                 wave_count += 1
                 
             except Exception as e:
-                logger.error(f"❌ DỪNG XỬ LÝ: {e.with_traceback()}")
+                raise Exception(f"❌ DỪNG XỬ LÝ: {e}")
                 
                 if "Rate limit backoff quá lâu" in str(e):
-                    raise
-                # raise
+                    raise Exception("API đang quá tải, vui lòng thử lại sau.")
                 
                 logger.warning(f"Bỏ qua wave {wave_count} do lỗi: {e}")
                 break

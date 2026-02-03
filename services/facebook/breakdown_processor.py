@@ -247,10 +247,14 @@ class FacebookBreakdownReporter(FacebookAdsBaseReporter):
             # Handle errors
             if response["status_code"] != 200:
                 error_detail = response.get("error", {})
-                logger.warning(
+
+                if (response["status_code"] == 403 or response["status_code"] == 400):
+                    raise Exception(response["error"]["message"])
+
+                self._report_progress(message=
                     f"\n  ✗ Request thất bại:"
-                    f"\n     Status Code: {response['status_code']}"
-                    f"\n     Error: {error_detail.get('message', 'Unknown error')}"
+                    + f"\n     Status Code: {response['status_code']}"
+                    + f"\n     Error: {error_detail.get('message', 'Unknown error')}"
                 )
                 
                 if 500 <= response["status_code"] < 600:
@@ -460,10 +464,10 @@ class FacebookBreakdownReporter(FacebookAdsBaseReporter):
                 wave_count += 1
                 
             except Exception as e:
-                logger.error(f"❌ DỪNG XỬ LÝ: {e}", exc_info=True)
+                raise Exception(f"❌ DỪNG XỬ LÝ: {e}")
                 
                 if "Rate limit backoff quá lâu" in str(e):
-                    raise
+                    raise Exception("API đang quá tải, vui lòng thử lại sau.")
                 
                 logger.warning(f"Bỏ qua wave {wave_count} do lỗi: {e}")
                 break

@@ -111,8 +111,9 @@ class FacebookAdsWorker(BaseReportWorker):
             }
             
         except Exception as e:
-            logger.error(f"[Job {self.job_id}] Error: {e}", exc_info=True)
-            raise
+            spreadsheet_id = self.context.get("spreadsheet_id", "Unknown")
+            logger.error(f"[Job {self.job_id}] Error (Spreadsheet: {spreadsheet_id}): {e}", exc_info=True)
+            raise Exception(f"Spreadsheet {spreadsheet_id}: {str(e)}") from e
         
     
 class FacebookDailyWorker(FacebookAdsWorker):

@@ -277,13 +277,16 @@ class FacebookPerformanceReporter(FacebookAdsBaseReporter):
             # Handle errors với logging chi tiết
             if response["status_code"] != 200:
                 error_detail = response.get("error", {})
-                logger.warning(
-                    f"\n  ✗ Request thất bại:"
-                    f"\n     Status Code: {response['status_code']}"
-                    f"\n     URL: {response.get('original_url', 'N/A')}"
-                    f"\n     Error Message: {error_detail.get('message', 'Unknown error')}"
-                    f"\n     Error Type: {error_detail.get('type', 'N/A')}"
-                    f"\n     Error Code: {error_detail.get('code', 'N/A')}"
+                if (response["status_code"] == 403 or response["status_code"] == 400):
+                    raise Exception(response["error"]["message"])
+                
+                self._report_progress(message = 
+                    "\n  ✗ Request thất bại:"
+                    + f"\n     Status Code: {response['status_code']}"
+                    + f"\n     URL: {response.get('original_url', 'N/A')}"
+                    + f"\n     Error Message: {error_detail.get('message', 'Unknown error')}"
+                    + f"\n     Error Type: {error_detail.get('type', 'N/A')}"
+                    + f"\n     Error Code: {error_detail.get('code', 'N/A')}"
                 )
                 
                 if 500 <= response["status_code"] < 600:
@@ -499,10 +502,10 @@ class FacebookPerformanceReporter(FacebookAdsBaseReporter):
                 wave_count += 1
                 
             except Exception as e:
-                logger.error(f"❌ DỪNG XỬ LÝ: {e}", exc_info=True)
+                raise Exception(f"❌ DỪNG XỬ LÝ: {e}")
                 
                 if "Rate limit backoff quá lâu" in str(e):
-                    raise
+                    raise Exception("API đang quá tải, vui lòng thử lại sau.")
                 
                 logger.warning(f"Bỏ qua wave {wave_count} do lỗi: {e}")
                 break
