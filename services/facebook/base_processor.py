@@ -11,6 +11,7 @@ from .constant import FACEBOOK_REPORT_TEMPLATES_STRUCTURE, CONVERSION_METRICS_MA
 from datetime import datetime, timedelta
 from collections import defaultdict
 import logging
+from services.facebook.err_handler.rate_limit import EnhancedBackoffHandler
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -26,10 +27,10 @@ class FacebookAdsBaseReporter:
     # Constants
     API_VERSION = "v24.0"
     BATCH_API_URL = "http://facebook_batch_server:8010/batch"  # FastAPI endpoint
-    # BATCH_API_URL = "http://14.225.253.94:8010/batch"
+    # BATCH_API_URL = "http://localhost:8010/batch"
     MAX_BACKOFF_SECONDS = 360  # 6 phút
     DEFAULT_BATCH_SIZE = 20
-    DEFAULT_SLEEP_TIME = 4  # seconds
+    DEFAULT_SLEEP_TIME = 10  # seconds
     MAX_RETRIES = 3
     MAX_PAGES_PER_RETRY = 10
     PLUS_BACKOFF_SEC = 3 # Thời gian đệm thêm khi backoff
@@ -61,9 +62,15 @@ class FacebookAdsBaseReporter:
         self.progress_callback = progress_callback
         self.job_id = job_id
         
+        self.summaries = []
+        self.batch_count = 0
+        self.total_backoff_sec = 0        
         # Stats
         self.total_rows_written = 0
         self.request_count = 0
+
+        self.backoff_handler = EnhancedBackoffHandler(reporter=self)
+
         
     def _report_progress(self, message: str, percentage: int = None):
         """Report progress nếu có callback"""
@@ -184,12 +191,13 @@ class FacebookAdsBaseReporter:
             response = requests.post(
                 self.batch_api_url,
                 json=payload,
-                timeout=120
+                timeout=180 # Timeout khi gọi batch API 3 phút
             )
             response.raise_for_status()
             
             data = response.json()
-            self.request_count += 1
+            self.batch_count += 1
+            self.request_count += len(relative_urls)
             
             # print(data)
             return data
@@ -230,10 +238,22 @@ class FacebookAdsBaseReporter:
                 
                 logger.info(f"  ✓ Batch {batch_number} thành công.")
                 
-                # Kiểm tra và backoff nếu cần
                 if "summary" in response_json:
+                    summary_with_time = response_json.get("summary")
+                    summary_with_time["timestamp"] = datetime.now().isoformat()
+                    self.summaries.append(summary_with_time)
+                
+                if hasattr(self, 'backoff_handler'):
                     print("Tồn tại summary: ", response_json["summary"])
-                    self._perform_backoff_if_needed(response_json["summary"])
+                    self.total_backoff_sec += self.backoff_handler.analyze_and_backoff(
+                        responses=responses_with_metadata,
+                        summary=response_json.get("summary")
+                    )
+                else:
+                    # Fallback to old logic if backoff_handler not initialized
+                    if "summary" in response_json:
+                        print("Tồn tại summary: ", response_json["summary"])
+                        self._perform_backoff_if_needed(response_json["summary"])
                 
                 return responses_with_metadata
                 
@@ -326,13 +346,15 @@ class FacebookAdsBaseReporter:
             yield lst[i:i + chunk_size]
     
     @staticmethod
-    def _generate_monthly_date_chunks(start_date: str, end_date: str) -> List[Dict[str, str]]:
+    def _generate_monthly_date_chunks(start_date: str, end_date: str, factor: int = 1) -> List[Dict[str, str]]:
         """
         Chia khoảng thời gian thành các chunks theo tháng.
+        Có thể chia nhỏ tháng thành nhiều phần nếu factor > 1.
         
         Args:
             start_date: YYYY-MM-DD
             end_date: YYYY-MM-DD
+            factor: Hệ số chia nhỏ (mặc định 1 = không chia nhỏ)
             
         Returns:
             List of {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}
@@ -344,7 +366,7 @@ class FacebookAdsBaseReporter:
         current_start = start
         
         while current_start <= end:
-            # Chunk end là cuối tháng hoặc end_date
+            # Chunk end là cuối tháng hoặc end_date (Logic cũ)
             current_month = current_start.month
             current_year = current_start.year
             
@@ -354,18 +376,39 @@ class FacebookAdsBaseReporter:
             else:
                 next_month = datetime(current_year, current_month + 1, 1)
             
-            chunk_end = next_month - timedelta(days=1)
+            # Ngày cuối cùng của đoạn tháng này (chặn bởi end_date)
+            month_chunk_end = next_month - timedelta(days=1)
+            if month_chunk_end > end:
+                month_chunk_end = end
+                
+            # --- Logic mới: Chia nhỏ month_chunk dựa trên factor ---
+            # Khoảng thời gian thực tế của chunk tháng này
+            days_in_chunk = (month_chunk_end - current_start).days + 1
             
-            # Không vượt quá end_date
-            if chunk_end > end:
-                chunk_end = end
+            if factor > 1 and days_in_chunk > 1:
+                # Tính kích thước mỗi sub-chunk (làm tròn lên)
+                sub_chunk_days = (days_in_chunk + factor - 1) // factor
+                
+                temp_start = current_start
+                while temp_start <= month_chunk_end:
+                    temp_end = temp_start + timedelta(days=sub_chunk_days - 1)
+                    if temp_end > month_chunk_end:
+                        temp_end = month_chunk_end
+                        
+                    chunks.append({
+                        "start": temp_start.strftime("%Y-%m-%d"),
+                        "end": temp_end.strftime("%Y-%m-%d")
+                    })
+                    
+                    temp_start = temp_end + timedelta(days=1)
+            else:
+                # Giữ nguyên nếu không cần chia
+                chunks.append({
+                    "start": current_start.strftime("%Y-%m-%d"),
+                    "end": month_chunk_end.strftime("%Y-%m-%d")
+                })
             
-            chunks.append({
-                "start": current_start.strftime("%Y-%m-%d"),
-                "end": chunk_end.strftime("%Y-%m-%d")
-            })
-            
-            # Move to next month
+            # Move to next month logic
             current_start = next_month
         
         return chunks

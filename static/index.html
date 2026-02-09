@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
+
 <body>
     <div class="app-wrapper">
         <aside class="sidebar">
@@ -17,16 +19,20 @@
             </div>
             <nav class="sidebar-nav">
                 <ul>
-                    <li class="active"><a href="#"><i class="fas fa-home"></i> Dashboard</a></li>
+                    <li class="active tab-link" data-tab="overview"><a href="#"><i class="fas fa-home"></i> Overview</a>
+                    </li>
+                    <li class="tab-link" data-tab="tiktok"><a href="#"><i class="fab fa-tiktok"></i> TikTok</a></li>
+                    <li class="tab-link" data-tab="facebook"><a href="#"><i class="fab fa-facebook"></i> Facebook</a>
+                    </li>
                     <li><a href="#"><i class="fas fa-database"></i> Data Source</a></li>
                     <li><a href="#"><i class="fas fa-cog"></i> Settings</a></li>
-                    </ul>
+                </ul>
             </nav>
         </aside>
 
         <main class="main-content">
             <header class="top-bar">
-                <h2>Server Tiktok GMV Monitoring</h2>
+                <h2 id="page-title">Dashboard Overview</h2>
                 <div class="controls">
                     <label for="date-range">Date Range:</label>
                     <select id="date-range">
@@ -39,7 +45,8 @@
                 </div>
             </header>
 
-            <div class="dashboard-content">
+            <!-- TAB 1: OVERVIEW -->
+            <div id="tab-overview" class="dashboard-content tab-content active">
                 <div class="summary-cards">
                     <div class="card">
                         <div class="card-icon green"><i class="fas fa-tasks"></i></div>
@@ -67,7 +74,6 @@
                         <div class="card-info">
                             <h3>Total Emails</h3>
                             <p id="total-emails">Loading...</p>
-                            <!-- <small>Tasks sent via email</small> -->
                         </div>
                     </div>
                     <div class="card">
@@ -80,7 +86,6 @@
                 </div>
 
                 <div class="grid-row-3">
-                    
                     <div class="chart-container">
                         <h3>Task Status Breakdown</h3>
                         <div class="chart-wrapper">
@@ -95,17 +100,18 @@
                         </div>
                     </div>
 
-                    <div class="chart-container" style="display: flex; flex-direction: column; height: 100%; min-height: 350px;">
-                        <h3>API Call Totals</h3>
-                        
-                        <div style="display: flex; justify-content: space-between; padding: 0 20px 10px 20px; color: #7f8c8d; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid #eee; margin-bottom: 10px;">
-                            <span>Endpoint / Task Type</span>
-                            <span style="min-width: 80px; text-align: right;">Count</span>
-                        </div>
-
-                        <div class="api-list-wrapper" style="flex-grow: 1; overflow-y: auto;">
-                            <ul id="api-totals-list">
-                                </ul>
+                    <div class="chart-container">
+                        <h3>Top Users (Failed Tasks)</h3>
+                        <div class="table-wrapper-small" style="height: 250px; overflow-y: auto;">
+                            <table class="simple-table">
+                                <thead>
+                                    <tr>
+                                        <th>User</th>
+                                        <th>Failed</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="top-failed-users-body"></tbody>
+                            </table>
                         </div>
                     </div>
 
@@ -132,15 +138,10 @@
                     </div>
                 </div>
 
-                <div class="chart-section">
-                    <h3>API Calls Timeline</h3>
-                    <div class="chart-wrapper-timeline">
-                        <canvas id="apiUsageChart"></canvas>
-                    </div>
-                </div>
+
 
                 <div class="table-section">
-                    <h3>Recent Tasks Log</h3>
+                    <h3>Recent Tasks Log (Max 1000 tasks)</h3>
                     <table>
                         <thead>
                             <tr>
@@ -151,7 +152,7 @@
                                 <th>Start Time</th>
                                 <th>End Time</th>
                                 <th>Duration (s)</th>
-                                <th>Error Message</th>
+                                <th>Message</th>
                             </tr>
                         </thead>
                         <tbody id="tasks-table-body">
@@ -159,9 +160,212 @@
                     </table>
                 </div>
             </div>
+
+            <!-- TAB 2: TIKTOK -->
+            <div id="tab-tiktok" class="dashboard-content tab-content" style="display: none;">
+                <div class="summary-cards">
+                    <div class="card">
+                        <div class="card-icon black"><i class="fab fa-tiktok"></i></div>
+                        <div class="card-info">
+                            <h3>Total TikTok Tasks</h3>
+                            <p id="tiktok-total-tasks">0</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon blue"><i class="fas fa-box-open"></i></div>
+                        <div class="card-info">
+                            <h3>Product Tasks</h3>
+                            <p id="tiktok-product-tasks">0</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon orange"><i class="fas fa-palette"></i></div>
+                        <div class="card-info">
+                            <h3>Creative Tasks</h3>
+                            <p id="tiktok-creative-tasks">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-row-3">
+                    <div class="chart-container">
+                        <h3>Task Type Breakdown (Product/Creative)</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="tiktokTypeChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Success Rate</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="tiktokStatusChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>TikTok API Totals</h3>
+                        <div class="chart-wrapper" style="overflow-y: auto;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Endpoint</th>
+                                        <th>Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tiktok-api-totals-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-section">
+                    <h3>TikTok API Timeline</h3>
+                    <div class="chart-wrapper-timeline">
+                        <canvas id="tiktokApiChart"></canvas>
+                    </div>
+                </div>
+
+
+
+                <div class="table-section">
+                    <h3>TikTok Recent Tasks</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Task Type</th>
+                                <th>User Email</th>
+                                <th>Status</th>
+                                <th>Duration (s)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tiktok-tasks-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 3: FACEBOOK -->
+            <div id="tab-facebook" class="dashboard-content tab-content" style="display: none;">
+                <div class="summary-cards">
+                    <div class="card">
+                        <div class="card-icon blue"><i class="fab fa-facebook-f"></i></div>
+                        <div class="card-info">
+                            <h3>Total Facebook Tasks</h3>
+                            <p id="fb-total-tasks">0</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-icon green"><i class="fas fa-check"></i></div>
+                        <div class="card-info">
+                            <h3>Successful Batches</h3>
+                            <p id="fb-success-batches">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-row-2-bias">
+                    <div class="chart-container">
+                        <h3>Facebook Usage Details</h3>
+                        <div class="chart-wrapper-wide">
+                            <canvas id="fbUsageChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container" style="display: flex; flex-direction: column;">
+                        <h3>Backoff Statistics</h3>
+                        <div
+                            style="flex-grow: 1; display:flex; align-items:center; justify-content:center; flex-direction:column;">
+                            <h1 id="fb-total-backoff" style="font-size: 3rem; color: #e74c3c; margin: 0;">0s</h1>
+                            <p>Total Backoff Time</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid-row-2">
+                    <div class="chart-container">
+                        <h3>Task Type Breakdown</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="fbTypeChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Success Rate</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="fbStatusChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-section">
+                    <h3>Facebook Recent Tasks</h3>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Template</th>
+                                <th>User Email</th>
+                                <th>Status</th>
+                                <th>Backoff (s)</th>
+                                <th>Batches</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fb-tasks-body"></tbody>
+                    </table>
+                </div>
+            </div>
         </main>
+    </div>
+
+    <!-- Task Detail Modal -->
+    <div id="task-detail-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <div class="modal-header">
+                <h2 id="modal-task-id">Task Details</h2>
+                <div class="modal-meta" id="modal-task-meta"></div>
+            </div>
+
+            <div class="modal-body">
+                <!-- Controls -->
+                <div class="modal-controls" style="margin-bottom: 15px; display: flex; gap: 10px;">
+                    <select id="account-selector" class="form-control">
+                        <option value="all">All Accounts (App Usage)</option>
+                    </select>
+                    <select id="metric-selector" class="form-control" disabled>
+                        <option value="app_usage">App Usage %</option>
+                        <option value="insights_usage">Insights Usage %</option>
+                        <option value="eta">ETA Seconds</option>
+                        <option value="cputime">Total CPU Time</option>
+                    </select>
+                </div>
+
+                <!-- Chart Section -->
+                <div class="chart-section no-margin">
+                    <h3>App Usage Over Time</h3>
+                    <div class="chart-wrapper-timeline">
+                        <canvas id="detailUsageChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Account Details Section -->
+                <div class="table-section mt-20">
+                    <h3>Involved Accounts</h3>
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Account ID</th>
+                                <th>Insights Usage</th>
+                                <th>ETA (s)</th>
+                                <th>Tier</th>
+                                <th>Call Count</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-account-list"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="/static/script.js"></script>
 </body>
+
 </html>

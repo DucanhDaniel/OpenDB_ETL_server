@@ -1275,7 +1275,7 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
           "selectable_fields": {
             "1. Thời gian & Tài khoản": ["date_start", "date_stop", "account_id", "account_name"],
             "2. Thông tin Quảng cáo": [
-                "campaign_name", "adset_name", "ad_name", "id", 
+                "campaign_name", "adset_name", "name", "id", 
                 "adset_bid_strategy", "adset_bid_amount",
                 "age", "gender" 
             ],

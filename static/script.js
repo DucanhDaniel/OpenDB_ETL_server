@@ -1,24 +1,24 @@
 const API_ENDPOINT = 'http://localhost:8011/api/dashboard';
 
-// Global Chart Instances để destroy khi render lại
+// Global Chart Instances
 let charts = {
     status: null,
-    apiUsage: null,
-    user: null,
-    endpoint: null
+    endpoint: null,
+    tiktokApi: null,
+    fbUsage: null
 };
 
-// Lưu dữ liệu gốc để lọc
 let rawData = null;
+let currentTab = "overview";
 
 // ================================================================
 // INIT & EVENT LISTENERS
 // ================================================================
 document.addEventListener('DOMContentLoaded', () => {
     fetchAndRender();
-    
+
     // Auto refresh 30s
-    setInterval(fetchAndRender, 30000); 
+    setInterval(fetchAndRender, 30000);
 
     // Date Range Filter Event
     document.getElementById('date-range').addEventListener('change', () => {
@@ -32,19 +32,47 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.style.transform = 'rotate(360deg)';
         setTimeout(() => btn.style.transform = 'none', 500);
     });
+
+    // Tab Switching Logic
+    const tabLinks = document.querySelectorAll('.tab-link');
+    tabLinks.forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+
+            // UI Update
+            document.querySelectorAll('.tab-link').forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+
+            const tabId = link.getAttribute('data-tab');
+            currentTab = tabId;
+
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            document.getElementById(`tab-${tabId}`).style.display = 'block';
+
+            // Update Title
+            const titleMap = {
+                'overview': 'Dashboard Overview',
+                'tiktok': 'TikTok Dashboard',
+                'facebook': 'Facebook Dashboard'
+            };
+            document.getElementById('page-title').textContent = titleMap[tabId];
+
+            // Re-render charts for active tab (to fix sizing issues)
+            if (rawData) applyFilterAndRender();
+        });
+    });
 });
 
 async function fetchAndRender() {
     try {
         const response = await fetch(API_ENDPOINT);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
+
         rawData = await response.json();
         applyFilterAndRender();
-        
+
     } catch (error) {
         console.error('Error:', error);
-        // Có thể hiện thông báo lỗi lên UI nếu cần
     }
 }
 
@@ -61,9 +89,8 @@ function applyFilterAndRender() {
     if (rangeType === '24h') cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     else if (rangeType === '7d') cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     else if (rangeType === '30d') cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    // 'all' -> cutoffDate = null
 
-    // 1. Lọc Tasks List
+    // 1. Filter Tasks
     let filteredTasks = rawData.task_logs || [];
     if (cutoffDate) {
         filteredTasks = filteredTasks.filter(t => {
@@ -72,67 +99,691 @@ function applyFilterAndRender() {
         });
     }
 
-    // 2. Render UI
-    renderSummaryCards(filteredTasks);
-    renderStatusChart(filteredTasks);
-    renderUserStats(filteredTasks);    // New: User Stats
-    renderEndpointChart(filteredTasks); // New: Endpoint Pie Chart
-    renderTasksTable(filteredTasks);
-    renderApiTotalsList(filteredTasks);
-
-    renderApiTimeseriesChart(rawData.api_timeseries || {}); 
+    // 2. Render based on active tab
+    if (currentTab === 'overview') {
+        renderOverview(filteredTasks);
+    } else if (currentTab === 'tiktok') {
+        renderTikTokDashboard(filteredTasks, rawData.api_timeseries);
+    } else if (currentTab === 'facebook') {
+        renderFacebookDashboard(filteredTasks);
+    }
 }
 
 // ================================================================
-// RENDER FUNCTIONS
+// TAB 1: OVERVIEW RENDERER
 // ================================================================
-
-function renderSummaryCards(tasks) {
+function renderOverview(tasks) {
+    // 1. Summary Cards
     const totalTasks = tasks.length;
     const successfulTasks = tasks.filter(t => t.status === 'SUCCESS').length;
     const successRate = totalTasks > 0 ? ((successfulTasks / totalTasks) * 100).toFixed(1) : 0;
-    
-    const totalDuration = tasks.reduce((sum, t) => sum + (t.duration_seconds || 0), 0);
-    const avgDuration = totalTasks > 0 ? (totalDuration / totalTasks).toFixed(1) : 0;
 
-    // Tính tổng email (Số task có user_email hợp lệ)
-    const tasksWithEmail = new Set(
-        tasks
-            .filter(t => t.user_email && t.user_email.includes('@'))
-            .map(t => t.user_email)
-    ).size;
+    // Avg Duration
+    const completedTasks = tasks.filter(t => t.duration_seconds && t.duration_seconds > 0);
+    const avgDuration = completedTasks.length > 0
+        ? (completedTasks.reduce((sum, t) => sum + t.duration_seconds, 0) / completedTasks.length).toFixed(1)
+        : 0;
+
+    // Emails
+    const uniqueEmails = new Set(tasks.map(t => t.user_email).filter(e => e && e.includes('@')));
 
     document.getElementById('total-tasks').textContent = totalTasks;
     document.getElementById('successful-tasks').textContent = successfulTasks;
     document.getElementById('success-rate').textContent = `${successRate}%`;
     document.getElementById('avg-duration').textContent = `${avgDuration}s`;
-    document.getElementById('total-emails').textContent = tasksWithEmail; // New Metric
+    document.getElementById('total-emails').textContent = uniqueEmails.size;
+
+    // 2. Status Chart
+    renderStatusChart(tasks);
+
+    // 3. Task Type Chart
+    renderEndpointChart(tasks);
+
+    // 4. Top Users Chart & Table
+    renderUserStats(tasks);
+
+    // 5. Top Failed Users Table (NEW)
+    const failedUsers = {};
+    tasks.forEach(t => {
+        if (t.status === 'FAILED' || t.status === 'FAILURE') {
+            const email = t.user_email || 'Unknown';
+            failedUsers[email] = (failedUsers[email] || 0) + 1;
+        }
+    });
+
+    const sortedFailedUsers = Object.entries(failedUsers)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10); // Top 10
+
+    const failedBody = document.getElementById('top-failed-users-body');
+    if (failedBody) {
+        if (sortedFailedUsers.length === 0) {
+            failedBody.innerHTML = '<tr><td colspan="2" style="text-align:center; color:#999;">No failed tasks</td></tr>';
+        } else {
+            failedBody.innerHTML = sortedFailedUsers.map(([email, count]) => `
+                <tr>
+                    <td>${email}</td>
+                    <td><strong style="color: #e74c3c;">${count}</strong></td>
+                </tr>
+            `).join('');
+        }
+    }
+
+    // 6. Recent Tasks Table
+    renderTasksTable(tasks, 'tasks-table-body');
 }
 
-// --- 1. Status Doughnut Chart ---
+// ================================================================
+// TAB 2: TIKTOK RENDERER
+// ================================================================
+function renderTikTokDashboard(tasks, apiTimeseries) {
+    // Filter TikTok Tasks
+    const tkTasks = tasks.filter(t =>
+        ['product', 'creative', 'tiktok_product', 'tiktok_creative'].includes(t.task_type)
+        || (t.api_total_counts && JSON.stringify(t.api_total_counts).includes("tiktok.com"))
+    );
+
+    const productTasks = tkTasks.filter(t => t.task_type.includes('product')).length;
+    const creativeTasks = tkTasks.filter(t => t.task_type.includes('creative')).length;
+
+    document.getElementById('tiktok-total-tasks').textContent = tkTasks.length;
+    document.getElementById('tiktok-product-tasks').textContent = productTasks;
+    document.getElementById('tiktok-creative-tasks').textContent = creativeTasks;
+
+    // --- NEW CHARTS for TikTok ---
+
+    // 1. Task Type Breakdown (Product vs Creative)
+    const typeCounts = { 'Product': 0, 'Creative': 0, 'Other': 0 };
+    tkTasks.forEach(t => {
+        const type = (t.task_type || '').toLowerCase();
+        if (type.includes('product')) typeCounts['Product']++;
+        else if (type.includes('creative')) typeCounts['Creative']++;
+        else typeCounts['Other']++;
+    });
+
+    const ctxTkType = document.getElementById('tiktokTypeChart').getContext('2d');
+    if (charts.tiktokType) charts.tiktokType.destroy();
+
+    charts.tiktokType = new Chart(ctxTkType, {
+        type: 'pie',
+        data: {
+            labels: Object.keys(typeCounts),
+            datasets: [{
+                data: Object.values(typeCounts),
+                backgroundColor: ['#3498db', '#e67e22', '#95a5a6']
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+
+    // 2. Success Rate Breakdown
+    const statusCounts = { 'Success': 0, 'Failed': 0, 'Cancelled': 0, 'Started': 0 };
+    tkTasks.forEach(t => {
+        const s = (t.status || '').toUpperCase();
+        if (s === 'SUCCESS' || s === 'COMPLETED') statusCounts['Success']++;
+        else if (s === 'CANCELLED' || s === 'REVOKED') statusCounts['Cancelled']++;
+        else if (s === 'STARTED' || s === 'RUNNING') statusCounts['Started']++;
+        else statusCounts['Failed']++;
+    });
+
+    const ctxTkStatus = document.getElementById('tiktokStatusChart').getContext('2d');
+    if (charts.tiktokStatus) charts.tiktokStatus.destroy();
+
+    charts.tiktokStatus = new Chart(ctxTkStatus, {
+        type: 'doughnut',
+        data: {
+            labels: ['Success', 'Failed', 'Cancelled', 'Started'],
+            datasets: [{
+                data: Object.values(statusCounts),
+                backgroundColor: ['#2ecc71', '#e74c3c', '#95a5a6', '#3498db'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+
+    // Chart: TikTok API Timeline -> Filter only tiktok endpoints
+    const tiktokEndpoints = {};
+    if (apiTimeseries) {
+        for (const [url, data] of Object.entries(apiTimeseries)) {
+            if (url.includes('tiktok.com')) {
+                // Shorten name
+                let name = url.split('/v1.3/')[1] || url;
+                name = name.replace(/\/$/, "");
+                tiktokEndpoints[name] = data;
+            }
+        }
+    }
+
+    renderLineChart('tiktokApiChart', tiktokEndpoints, charts.tiktokApi, (c) => charts.tiktokApi = c);
+
+    // --- API Totals Table ---
+    const endpointCounts = {};
+    if (tiktokEndpoints) { // tiktokEndpoints is already filtered from apiTimeseries
+        Object.values(tiktokEndpoints).forEach(data => {
+            if (Array.isArray(data)) {
+                data.forEach(p => {
+                    // Check 'breakdown' for specific endpoints if available, otherwise just use Count
+                    // The requirement is "Endpoint / Task Type" and "Count"
+                    // 'tiktokEndpoints' keys ARE the endpoint names (from url)
+                });
+            }
+        });
+
+        // Actually tiktokEndpoints map is: { "business/get/": [{timestamp, count}, ...], ... }
+        // We need to sum up count for each key.
+
+        for (const [endpoint, data] of Object.entries(tiktokEndpoints)) {
+            const total = data.reduce((sum, item) => sum + (item.count || 0), 0);
+            endpointCounts[endpoint] = total;
+        }
+    }
+
+    const sortedEndpoints = Object.entries(endpointCounts)
+        .sort((a, b) => b[1] - a[1]);
+
+    const totalsBody = document.getElementById('tiktok-api-totals-body');
+    if (totalsBody) {
+        totalsBody.innerHTML = sortedEndpoints.map(([ep, count]) => `
+            <tr>
+                <td>${ep}</td>
+                <td><strong>${count}</strong></td>
+            </tr>
+        `).join('');
+    }
+
+    // Table
+    renderTasksTable(tkTasks, 'tiktok-tasks-body', ['job_id', 'task_type', 'user_email', 'status', 'duration_seconds']);
+}
+
+// ================================================================
+// TAB 3: FACEBOOK RENDERER
+// ================================================================
+function renderFacebookDashboard(tasks) {
+    const fbTasks = tasks.filter(t =>
+        t.task_type && (t.task_type.includes('facebook') || t.task_type.includes('fb'))
+    );
+
+    // Calculate aggregated stats
+    let totalBatches = 0;
+    let successBatches = 0;
+    let totalBackoff = 0;
+
+    // Aggregated Usage for Chart
+    // Usage: app_usage_pct, insights_usage, etc.
+    // Since these are per-request snapshots, displaying them as a timeline or distribution is tricky.
+    // User asked for "visualize detailed API usage".
+    // We can parse 'api_total_counts' which contains 'summaries' for Facebook tasks.
+
+    // Let's count success vs error batches from summaries
+
+    fbTasks.forEach(t => {
+        if (t.api_total_counts) {
+            totalBackoff += (t.api_total_counts.total_backoff_sec || 0);
+
+            const summaries = t.api_total_counts.summaries || [];
+            if (Array.isArray(summaries)) {
+                summaries.forEach(s => {
+                    totalBatches++;
+                    // Assumes summary has success_count/error_count
+                    if (s.success_count > 0 && s.error_count === 0) successBatches++;
+                });
+            }
+        }
+    });
+
+    document.getElementById('fb-total-tasks').textContent = fbTasks.length;
+    document.getElementById('fb-success-batches').textContent = successBatches; // Display batches count
+    document.getElementById('fb-total-backoff').textContent = `${totalBackoff}s`;
+
+    // Chart: API Usage Breakdown (Batches vs Single Calls etc? Or Request Counts)
+    // Let's graph Request Breakdown based on "Business Use Cases" if available in log
+    // Or simpler: Success vs Failed batches over tasks?
+
+    // Let's try to visualize: Call Counts by Type (Campaign, AdSet, Ad, Insights) if detectable.
+    // Based on user log: `api_total_counts.summaries` has rate limits.
+    // Let's do a Pie Chart of "App Usage Pct" bucket distribution (Safe, Warning, Critical)
+
+    const usageBuckets = { 'Safe (<75%)': 0, 'Warning (75-95%)': 0, 'Critical (>95%)': 0 };
+
+    fbTasks.forEach(t => {
+        const summaries = t.api_total_counts?.summaries || [];
+        summaries.forEach(s => {
+            const appUsage = s.rate_limits?.app_usage_pct || 0;
+            if (appUsage >= 95) usageBuckets['Critical (>95%)']++;
+            else if (appUsage >= 75) usageBuckets['Warning (75-95%)']++;
+            else usageBuckets['Safe (<75%)']++;
+        });
+    });
+
+    const ctx = document.getElementById('fbUsageChart').getContext('2d');
+    if (charts.fbUsage) charts.fbUsage.destroy();
+
+    charts.fbUsage = new Chart(ctx, {
+        type: 'bar', // Using Bar to show volume
+        data: {
+            labels: Object.keys(usageBuckets),
+            datasets: [{
+                label: 'Batch Requests by Usage Load',
+                data: Object.values(usageBuckets),
+                backgroundColor: ['#2ecc71', '#f1c40f', '#e74c3c']
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+
+    // --- NEW CHARTS: Type & Status ---
+
+    // 1. Task Type Breakdown
+    const typeCounts = { 'Daily': 0, 'Performance': 0, 'Breakdown': 0, 'Other': 0 };
+    fbTasks.forEach(t => {
+        let name = (t.task_type || '').toLowerCase(); // Use task_type which contains 'facebook_daily' etc.
+        if (name.includes('daily')) typeCounts['Daily']++;
+        else if (name.includes('performance')) typeCounts['Performance']++;
+        else if (name.includes('breakdown')) typeCounts['Breakdown']++;
+        else typeCounts['Other']++;
+    });
+
+    const ctxType = document.getElementById('fbTypeChart').getContext('2d');
+    if (charts.fbType) charts.fbType.destroy();
+
+    charts.fbType = new Chart(ctxType, {
+        type: 'pie',
+        data: {
+            labels: Object.keys(typeCounts),
+            datasets: [{
+                data: Object.values(typeCounts),
+                backgroundColor: ['#3498db', '#9b59b6', '#f1c40f', '#95a5a6']
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+
+    // 2. Success Rate Breakdown
+    const statusCounts = { 'Success': 0, 'Failed': 0, 'Cancelled': 0, 'Started': 0 };
+    fbTasks.forEach(t => {
+        const s = (t.status || '').toUpperCase();
+        if (s === 'SUCCESS' || s === 'COMPLETED') statusCounts['Success']++;
+        else if (s === 'CANCELLED' || s === 'REVOKED') statusCounts['Cancelled']++;
+        else if (s === 'STARTED' || s === 'RUNNING') statusCounts['Started']++;
+        else statusCounts['Failed']++;
+    });
+
+    const ctxStatus = document.getElementById('fbStatusChart').getContext('2d');
+    if (charts.fbStatus) charts.fbStatus.destroy();
+
+    charts.fbStatus = new Chart(ctxStatus, {
+        type: 'doughnut',
+        data: {
+            labels: ['Success', 'Failed', 'Cancelled', 'Started'],
+            datasets: [{
+                data: [
+                    statusCounts['Success'],
+                    statusCounts['Failed'],
+                    statusCounts['Cancelled'],
+                    statusCounts['Started']
+                ],
+                backgroundColor: [
+                    '#2ecc71', // Green
+                    '#e74c3c', // Red
+                    '#95a5a6', // Grey
+                    '#3498db'  // Blue
+                ],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+
+    // Table specialized for Facebook
+    const tbody = document.getElementById('fb-tasks-body');
+    const displayTasks = fbTasks.slice(0, 1000);
+
+    tbody.innerHTML = displayTasks.map(t => {
+        const template = t.template_name || 'N/A';
+        const batches = t.api_total_counts?.batch_count || 0;
+        const backoff = t.api_total_counts?.total_backoff_sec || 0;
+
+        return `
+            <tr onclick="openTaskDetail('${t.job_id}')" title="Click to view details">
+                <td><span class="job-id">${(t.job_id || '').substring(0, 8)}...</span></td>
+                <td>${template}</td>
+                <td>${t.user_email}</td>
+                <td class="status-${t.status}">${t.status}</td>
+                <td>${backoff}s</td>
+                <td>${batches}</td>
+                <td class="task-message" style="max-width: 300px; white-space: normal; word-wrap: break-word;">${t.message || ''}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+
+// ================================================================
+// ================================================================
+// TASK DETAIL MODAL
+// ================================================================
+
+let currentTaskData = null; // Store parsed data for dynamic charting
+
+function openTaskDetail(jobId) {
+    if (!rawData || !rawData.task_logs) return;
+    const task = rawData.task_logs.find(t => t.job_id === jobId);
+    if (!task) return;
+
+    // 1. Basic Info
+    document.getElementById('modal-task-id').textContent = `Task: ${jobId}`;
+    document.getElementById('modal-task-meta').innerHTML = `
+        <span class="status-${task.status}">${task.status}</span> | 
+        ${task.user_email} | 
+        ${new Date(task.start_time).toLocaleString()}
+    `;
+
+    // 2. Parse Data
+    const summaries = task.api_total_counts?.summaries || [];
+    currentTaskData = {
+        timestamps: [],
+        appUsage: [],
+        accounts: {}
+    };
+
+    summaries.forEach((s, index) => {
+        const label = s.timestamp ? new Date(s.timestamp).toLocaleTimeString() : `Batch ${index + 1}`;
+        currentTaskData.timestamps.push(label);
+        currentTaskData.appUsage.push(s.rate_limits?.app_usage_pct || 0);
+
+        if (s.rate_limits?.account_details) {
+            s.rate_limits.account_details.forEach(acc => {
+                const accId = acc.account_id;
+                if (!currentTaskData.accounts[accId]) {
+                    currentTaskData.accounts[accId] = {
+                        insightsUsage: [],
+                        eta: [],
+                        cpuTime: [],
+                        tier: 'N/A',
+                        call_count: 0,
+                        max_insights: 0,
+                        max_eta: 0
+                    };
+                    // Fill gaps for previous timestamps if this account wasn't seen
+                    for (let i = 0; i < currentTaskData.timestamps.length - 1; i++) {
+                        currentTaskData.accounts[accId].insightsUsage.push(0);
+                        currentTaskData.accounts[accId].eta.push(0);
+                        currentTaskData.accounts[accId].cpuTime.push(0);
+                    }
+                }
+
+                currentTaskData.accounts[accId].insightsUsage.push(acc.insights_usage_pct || 0);
+                currentTaskData.accounts[accId].eta.push(acc.eta_seconds || 0);
+
+                // CPU Time
+                let cpu = 0;
+                let tier = currentTaskData.accounts[accId].tier;
+                if (acc.business_use_cases) {
+                    acc.business_use_cases.forEach(uc => {
+                        cpu += (uc.total_cputime || 0);
+                        if (uc.type === 'ads_insights') tier = uc.ads_api_access_tier;
+                    });
+                }
+                currentTaskData.accounts[accId].cpuTime.push(cpu);
+                currentTaskData.accounts[accId].tier = tier;
+
+                // Aggregates for table
+                currentTaskData.accounts[accId].max_insights = Math.max(currentTaskData.accounts[accId].max_insights, acc.insights_usage_pct || 0);
+                currentTaskData.accounts[accId].max_eta = Math.max(currentTaskData.accounts[accId].max_eta, acc.eta_seconds || 0);
+                currentTaskData.accounts[accId].call_count++; // Simple batch count participation
+            });
+
+            // Fill gaps for accounts not present in this summary
+            Object.keys(currentTaskData.accounts).forEach(accId => {
+                const acc = currentTaskData.accounts[accId];
+                if (acc.insightsUsage.length < currentTaskData.timestamps.length) {
+                    acc.insightsUsage.push(0);
+                    acc.eta.push(0);
+                    acc.cpuTime.push(0);
+                }
+            });
+        }
+    });
+
+    // 3. Populate Selectors
+    const accSelect = document.getElementById('account-selector');
+    const metricSelect = document.getElementById('metric-selector');
+
+    accSelect.innerHTML = '<option value="all">All Accounts (App Usage)</option>';
+    Object.keys(currentTaskData.accounts).forEach(accId => {
+        accSelect.innerHTML += `<option value="${accId}">${accId}</option>`;
+    });
+
+    accSelect.onchange = () => {
+        const isAll = accSelect.value === 'all';
+        metricSelect.disabled = isAll;
+        metricSelect.value = isAll ? 'app_usage' : 'insights_usage'; // Reset metric on mode switch
+        updateDetailChart();
+    };
+
+    metricSelect.onchange = updateDetailChart;
+
+    // 4. Render Initial View
+    updateDetailChart();
+
+    // 5. Render Account List
+    const tbody = document.getElementById('modal-account-list');
+    tbody.innerHTML = Object.entries(currentTaskData.accounts).map(([id, data]) => `
+        <tr>
+            <td>${id}</td>
+            <td>${data.max_insights}%</td>
+            <td>${data.max_eta > 0 ? `<strong style="color:red">${data.max_eta}</strong>` : '0'}</td>
+            <td>${data.tier}</td>
+            <td>${data.call_count}</td>
+        </tr>
+    `).join('');
+
+    // 6. Show Modal
+    const modal = document.getElementById('task-detail-modal');
+    modal.style.display = "block";
+
+    const span = modal.querySelector(".close-modal");
+    span.onclick = function () { modal.style.display = "none"; }
+    window.onclick = function (event) { if (event.target == modal) modal.style.display = "none"; }
+}
+
+function updateDetailChart() {
+    if (!currentTaskData) return;
+
+    const accSelect = document.getElementById('account-selector');
+    const metricSelect = document.getElementById('metric-selector');
+    const accountId = accSelect.value;
+    const metric = metricSelect.value;
+
+    let labels = currentTaskData.timestamps;
+    let data = [];
+    let label = '';
+    let color = '#e74c3c';
+    let yMax = 100;
+
+    if (accountId === 'all') {
+        data = currentTaskData.appUsage;
+        label = 'App Usage PCT (Global)';
+        color = '#e74c3c'; // Red
+    } else {
+        const accData = currentTaskData.accounts[accountId];
+        if (!accData) return;
+
+        switch (metric) {
+            case 'insights_usage':
+                data = accData.insightsUsage;
+                label = `Insights Usage PCT (${accountId})`;
+                color = '#3498db'; // Blue
+                break;
+            case 'eta':
+                data = accData.eta;
+                label = `ETA Seconds (${accountId})`;
+                color = '#f39c12'; // Orange
+                yMax = null; // Auto scale
+                break;
+            case 'cputime':
+                data = accData.cpuTime;
+                label = `Total CPU Time (${accountId})`;
+                color = '#9b59b6'; // Purple
+                yMax = null;
+                break;
+            default:
+                data = [];
+        }
+    }
+
+    const ctx = document.getElementById('detailUsageChart').getContext('2d');
+    if (charts.detailUsage) charts.detailUsage.destroy();
+
+    charts.detailUsage = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: label,
+                data: data,
+                borderColor: color,
+                backgroundColor: hexToRgba(color, 0.1),
+                fill: true,
+                tension: 0.3,
+                pointRadius: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: yMax,
+                    title: { display: true, text: 'Value' }
+                }
+            },
+            plugins: {
+                annotation: (accountId === 'all' || metric === 'insights_usage') ? {
+                    annotations: {
+                        line1: {
+                            type: 'line',
+                            yMin: 95,
+                            yMax: 95,
+                            borderColor: 'red',
+                            borderWidth: 1,
+                            borderDash: [5, 5],
+                            label: { content: 'Limit', enabled: true }
+                        }
+                    }
+                } : {}
+            }
+        }
+    });
+}
+
+function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+
+// ================================================================
+// CHART HELPERS
+// ================================================================
+
+function renderUserStats(tasks) {
+    // 1. Prepare Data
+    const userCounts = {};
+    tasks.forEach(t => {
+        if (t.user_email) userCounts[t.user_email] = (userCounts[t.user_email] || 0) + 1;
+    });
+
+    const sortedUsers = Object.entries(userCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5); // Top 5
+
+    // 2. Render Table
+    const tbody = document.getElementById('top-users-body');
+    if (tbody) {
+        tbody.innerHTML = sortedUsers.map(([email, count]) => `
+            <tr>
+                <td>${email}</td>
+                <td><strong>${count}</strong></td>
+            </tr>
+        `).join('');
+    }
+
+    // 3. Render Chart
+    const ctx = document.getElementById('userChart').getContext('2d');
+
+    // Check global chart instance map, create one for 'user' if not exists in init
+    if (typeof charts.user === 'undefined') charts.user = null;
+    if (charts.user) charts.user.destroy();
+
+    charts.user = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: sortedUsers.map(u => u[0].split('@')[0]), // Shorten email
+            datasets: [{
+                label: 'Tasks Count',
+                data: sortedUsers.map(u => u[1]),
+                backgroundColor: '#3498db',
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { beginAtZero: true } }
+        }
+    });
+}
+
 function renderStatusChart(tasks) {
     const counts = tasks.reduce((acc, t) => {
         acc[t.status] = (acc[t.status] || 0) + 1;
         return acc;
     }, {});
-    
-    const labels = Object.keys(counts);
-    const data = Object.values(counts);
 
-    // 2. Định nghĩa bảng màu cố định (Color Map)
+    // Define Color Map
     const colorMap = {
-        'SUCCESS': '#2ecc71',   // Xanh lá
-        'FAILED': '#e74c3c',    // Đỏ
-        'STARTED': '#3498db',   // Xanh dương (đang chạy)
-        'PENDING': '#f1c40f',   // Vàng (chờ)
-        'TIMED_OUT': '#95a5a6', // Xám
-        'REVOKED': '#7f8c8d'    // Xám đậm
+        'SUCCESS': '#2ecc71',   // Green
+        'COMPLETED': '#2ecc71',
+        'FAILED': '#e74c3c',    // Red
+        'FAILURE': '#e74c3c',
+        'STARTED': '#3498db',   // Blue
+        'RUNNING': '#3498db',
+        'PENDING': '#f1c40f',   // Yellow
+        'REVOKED': '#95a5a6',   // Grey
+        'CANCELLED': '#7f8c8d',  // Dark Grey
+        'TIMED_OUT': '#e67e22'  // Orange
     };
 
-    // 3. Tạo mảng màu dựa trên label thực tế
-    const backgroundColors = labels.map(status => {
-        return colorMap[status] || '#bdc3c7'; 
-    });
+    const labels = Object.keys(counts);
+    const data = Object.values(counts);
+    const backgroundColors = labels.map(status => colorMap[status] || '#bdc3c7'); // Default light grey
 
     const ctx = document.getElementById('statusChart').getContext('2d');
     if (charts.status) charts.status.destroy();
@@ -143,56 +794,19 @@ function renderStatusChart(tasks) {
             labels: labels,
             datasets: [{
                 data: data,
-                backgroundColor: backgroundColors, // Sử dụng mảng màu đã map đúng
+                backgroundColor: backgroundColors,
                 borderWidth: 0
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { 
-                legend: { position: 'right' } 
-            }
+            plugins: { legend: { position: 'right' } }
         }
     });
 }
 
-function renderApiTotalsList(tasks) {
-    const list = document.getElementById('api-totals-list');
-    if (!list) return;
-
-    // Tính tổng số liệu thực tế
-    const counts = aggregateApiCounts(tasks);
-
-    // Sắp xếp giảm dần (API nào gọi nhiều nhất lên đầu)
-    const sorted = Object.entries(counts).sort(([, a], [, b]) => b - a);
-
-    if (sorted.length === 0) {
-        list.innerHTML = '<li style="text-align:center; padding:10px; border:none; background:none;">No API calls recorded</li>';
-        return;
-    }
-
-    // Render HTML
-    list.innerHTML = sorted.map(([fullUrl, count]) => {
-        // Logic rút gọn link: Xóa domain, giữ lại phần đuôi
-        const shortName = fullUrl.replace('https://business-api.tiktok.com/open_api/v1.3/', '');
-
-        return `
-            <li>
-                <span class="api-name" title="${fullUrl}">${shortName}</span>
-                <span class="api-count">${count}</span>
-            </li>
-        `;
-    }).join('');
-}
-
-// --- 2. Endpoint Pie Chart (New) ---
 function renderEndpointChart(tasks) {
-    // Nhóm theo Endpoint (dựa vào task type hoặc trích xuất từ đâu đó)
-    // Giả sử dùng 'task_type' hoặc logic map từ API Total
-    // Nếu muốn chính xác endpoint url, cần lấy từ api_total_counts hoặc task detail
-    
-    // Ở đây ta đếm từ filteredTasks theo task_type
     const counts = tasks.reduce((acc, t) => {
         const type = t.task_type || 'Unknown';
         acc[type] = (acc[type] || 0) + 1;
@@ -220,84 +834,34 @@ function renderEndpointChart(tasks) {
     });
 }
 
-// --- 3. User Stats (Chart + Table) (New) ---
-function renderUserStats(tasks) {
-    // Đếm số task theo email
-    const userCounts = tasks.reduce((acc, t) => {
-        if(t.user_email) {
-            acc[t.user_email] = (acc[t.user_email] || 0) + 1;
-        }
-        return acc;
-    }, {});
+function renderLineChart(canvasId, datasetMap, chartInstance, setChartInstance) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    if (chartInstance) chartInstance.destroy();
 
-    // Chuyển sang mảng và sort giảm dần
-    const sortedUsers = Object.entries(userCounts)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10); // Lấy top 10
+    if (!datasetMap || Object.keys(datasetMap).length === 0) return;
 
-    // Render Table
-    const tbody = document.getElementById('top-users-body');
-    tbody.innerHTML = sortedUsers.map(([email, count]) => `
-        <tr>
-            <td>${email}</td>
-            <td><strong>${count}</strong></td>
-        </tr>
-    `).join('');
-
-    // Render Horizontal Bar Chart
-    const ctx = document.getElementById('userChart').getContext('2d');
-    if (charts.user) charts.user.destroy();
-
-    charts.user = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: sortedUsers.map(u => u[0].split('@')[0]), // Lấy tên trước @ cho ngắn
-            datasets: [{
-                label: 'Tasks Count',
-                data: sortedUsers.map(u => u[1]),
-                backgroundColor: '#3498db',
-                borderRadius: 4
-            }]
-        },
-        options: {
-            indexAxis: 'y', // Biểu đồ ngang
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: { x: { beginAtZero: true } }
-        }
-    });
-}
-
-// --- 4. Timeline Chart (Giữ nguyên logic cũ nhưng chỉnh style) ---
-function renderApiTimeseriesChart(apiTimeseries) {
-    if(!apiTimeseries) return;
+    const colors = ['#1abc9c', '#e74c3c', '#3498db', '#f1c40f', '#9b59b6'];
     const datasets = [];
-    const colors = ['#1abc9c', '#e74c3c', '#3498db', '#f1c40f'];
-    let colorIndex = 0;
+    let i = 0;
 
-    for (const endpoint in apiTimeseries) {
+    for (const [label, dataPoints] of Object.entries(datasetMap)) {
         datasets.push({
-            label: endpoint.replace('https://business-api.tiktok.com/open_api/v1.3/', ''),
-            data: apiTimeseries[endpoint].map(item => item.count),
-            borderColor: colors[colorIndex % colors.length],
+            label: label,
+            data: dataPoints.map(d => d.count),
+            borderColor: colors[i % colors.length],
             tension: 0.3,
-            fill: false,
-            pointRadius: 2
+            fill: false
         });
-        colorIndex++;
+        i++;
     }
-    
-    // Lấy labels từ endpoint đầu tiên
-    const firstKey = Object.keys(apiTimeseries)[0];
-    const labels = firstKey ? apiTimeseries[firstKey].map(item => 
-        new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    ) : [];
 
-    const ctx = document.getElementById('apiUsageChart').getContext('2d');
-    if (charts.apiUsage) charts.apiUsage.destroy();
-    
-    charts.apiUsage = new Chart(ctx, {
+    // Labels based on first dataset
+    const firstData = Object.values(datasetMap)[0];
+    const labels = firstData.map(d =>
+        new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    );
+
+    const newChart = new Chart(ctx, {
         type: 'line',
         data: { labels, datasets },
         options: {
@@ -305,50 +869,50 @@ function renderApiTimeseriesChart(apiTimeseries) {
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
             plugins: { legend: { position: 'bottom' } },
-            scales: { y: { beginAtZero: true, grid: { borderDash: [2, 4] } } }
+            scales: { y: { beginAtZero: true } }
         }
     });
+
+    setChartInstance(newChart);
 }
 
-// --- 5. Task Table ---
-function renderTasksTable(tasks) {
-    const tbody = document.getElementById('tasks-table-body');
-    // Chỉ hiện tối đa 100 task mới nhất để tránh lag browser
-    const displayTasks = tasks.slice(0, 100); 
-    
+function renderTasksTable(tasks, tableBodyId, columns = null) {
+    const tbody = document.getElementById(tableBodyId);
+    if (!tbody) return;
+
+    const displayTasks = tasks.slice(0, 1000);
+
     tbody.innerHTML = displayTasks.map(t => {
         const startTime = t.start_time ? new Date(t.start_time.replace('+00:00', '')).toLocaleString() : '';
         const endTime = t.end_time ? new Date(t.end_time.replace('+00:00', '')).toLocaleString() : '';
-        
+        const duration = (t.duration_seconds || 0).toFixed(2);
+
+        // Default Columns
+        if (!columns) {
+            return `
+                <tr>
+                    <td><span title="${t.job_id}" class="job-id">${(t.job_id || '').substring(0, 8)}...</span></td>
+                    <td>${t.task_type}</td>
+                    <td>${t.user_email}</td>
+                    <td class="status-${t.status}">${t.status}</td>
+                    <td>${startTime}</td>
+                    <td>${endTime}</td>
+                    <td>${duration}</td>
+                    <td class="task-message" style="max-width: 300px; white-space: normal; word-wrap: break-word;">${t.message || ''}</td>
+                </tr>
+            `;
+        }
+
+        // Custom Columns (Simplified logic)
+        // Only implementing subset for TikTok view as requested
         return `
             <tr>
-                <td><span title="${t.job_id}" style="font-family:monospace; background:#eee; padding:2px 4px; border-radius:3px;">${(t.job_id || '').substring(0, 8)}...</span></td>
+                <td><span title="${t.job_id}" class="job-id">${(t.job_id || '').substring(0, 8)}...</span></td>
                 <td>${t.task_type}</td>
                 <td>${t.user_email}</td>
                 <td class="status-${t.status}">${t.status}</td>
-                <td>${startTime}</td>
-                <td>${endTime}</td>
-                <td>${(t.duration_seconds || 0).toFixed(2)}</td>
-                <td style="color: #c0392b; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${t.error_message || ''}">${t.error_message || ''}</td>
+                <td>${duration}</td>
             </tr>
         `;
     }).join('');
-}
-
-function aggregateApiCounts(tasks) {
-    const globalCounts = {};
-
-    tasks.forEach(task => {
-        // Kiểm tra xem task có dữ liệu api_total_counts không
-        if (task.api_total_counts && typeof task.api_total_counts === 'object') {
-            
-            // Duyệt qua từng endpoint trong task đó
-            Object.entries(task.api_total_counts).forEach(([url, count]) => {
-                // Cộng dồn vào biến tổng global
-                globalCounts[url] = (globalCounts[url] || 0) + count;
-            });
-        }
-    });
-
-    return globalCounts;
 }

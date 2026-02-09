@@ -104,19 +104,27 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
         
         logger.info(f"Task postrun: Updating log for job {job_id} with state {state}")
         
-        # Determine final status
-        error_msg = str(retval) if state == 'FAILURE' else None
+        # Determine final status and message
+        final_status = state
+        message = None
         api_total_counts = {}
-        
-        if isinstance(retval, TaskCancelledException) or (error_msg and 'TaskCancelledException' in error_msg):
-            final_status = 'CANCELLED'
-            error_msg = "Task was cancelled by user."
-        elif state == 'SUCCESS':
-            final_status = 'SUCCESS'
-            if isinstance(retval, dict):
-                api_total_counts = retval.get("api_usage", {})
-        else:
+
+        if isinstance(retval, dict):
+            # Worker returned a dict (likely SUCCESS or handled FAILED)
+            final_status = retval.get("status", state)
+            message = retval.get("message")
+            api_total_counts = retval.get("api_usage", {})
+        elif isinstance(retval, Exception):
+            # Celery exception (TaskCancelled or other crash)
+            message = str(retval)
             final_status = 'FAILED'
+        elif isinstance(retval, str):
+            message = retval
+
+        # Special casing for cancellation
+        if isinstance(retval, TaskCancelledException) or (message and 'TaskCancelledException' in message):
+            final_status = 'CANCELLED'
+            message = "Task was cancelled by user."
         
         # Update database
         try:
@@ -135,7 +143,7 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
                         "status": final_status,
                         "end_time": end_time,
                         "duration_seconds": round(duration, 2),
-                        "error_message": error_msg,
+                        "message": message,
                         "api_total_counts": api_total_counts
                     }}
                 )
@@ -145,7 +153,7 @@ def on_task_postrun(sender=None, task_id=None, state=None, retval=None, args=Non
 
 # ==================== CELERY TASK ====================
 
-@celery_app.task(soft_time_limit=900, time_limit=1200)
+@celery_app.task(soft_time_limit=1500, time_limit=1800)
 def run_report_job(context: Dict[str, Any]):
     """
     Universal Celery task cho tất cả report types.
@@ -162,7 +170,7 @@ def run_report_job(context: Dict[str, Any]):
             
     Returns:
         Dict containing:
-            - status: "COMPLETED" or "FAILED"
+            - status: "SUCCESS" or "FAILED"
             - message: Human-readable message
             - api_usage: API usage statistics
     """
@@ -209,17 +217,29 @@ def run_report_job(context: Dict[str, Any]):
         #     "api_usage": {...}
         # }
         
-        # ========== BƯỚC 3: Ghi dữ liệu ra sheet ==========
-        final_message = result["message"]
+        # ========== BƯỚC 3: Xử lý kết quả ==========
+        final_message = result.get("message", "No message")
+        final_status = result.get("status", "SUCCESS")
+        api_usage = result.get("api_usage", {})
         
-        # ========== BƯỚC 4: Gửi final callback ==========
+        # Nếu trạng thái là FAILED thì gửi update FAILED và raise lỗi
+        if final_status == "FAILED":
+            logger.error(f"[Job {job_id}] Worker reported failure: {final_message}")
+            send_progress_update("FAILED", final_message)
+            return {
+                "status": "FAILED",
+                "message": final_message,
+                "api_usage": api_usage
+            }
+
+        # ========== BƯỚC 4: Gửi final callback SUCCESS ==========
         logger.info(f"[Job {job_id}] Completed successfully")
         send_progress_update("COMPLETED", final_message, 100)
         
         return {
-            "status": "COMPLETED",
+            "status": "SUCCESS",
             "message": final_message,
-            "api_usage": result.get("api_usage", {})
+            "api_usage": api_usage
         }
         
     except TaskCancelledException:

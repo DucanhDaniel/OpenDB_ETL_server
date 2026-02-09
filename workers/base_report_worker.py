@@ -276,6 +276,7 @@ class BaseReportWorker(ABC):
         """
         logger.info(f"[Job {self.job_id}] Starting {self.task_type} worker")
         
+        
         try:
             # Step 1: Initialize
             self._send_progress("RUNNING", "Initializing...", 0)
@@ -342,7 +343,7 @@ class BaseReportWorker(ABC):
             )
             
             return {
-                "status": "COMPLETED",
+                "status": "SUCCESS",
                 "message": message,
                 "api_usage": self.api_usage,
                 "stats": {
@@ -355,4 +356,14 @@ class BaseReportWorker(ABC):
         except Exception as e:
             spreadsheet_id = self.context.get("spreadsheet_id", "Unknown")
             logger.error(f"[Job {self.job_id}] Error (Spreadsheet: {spreadsheet_id}): {e}", exc_info=True)
-            raise Exception(f"Spreadsheet {spreadsheet_id}: {str(e)}") from e
+
+            return {
+                "status": "FAILED",
+                "message": f"Spreadsheet {spreadsheet_id}: {str(e)}",
+                "api_usage": self.api_usage,
+                "stats": {
+                    "cached_rows": self.cached_rows,
+                    "api_rows": self.api_rows,
+                    "total_rows": self.cached_rows + self.api_rows
+                }
+            }

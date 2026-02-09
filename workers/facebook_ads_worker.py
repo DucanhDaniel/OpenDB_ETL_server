@@ -7,6 +7,7 @@ from workers.base_report_worker import BaseReportWorker
 from services.facebook.daily_processor import FacebookDailyReporter
 from services.facebook.generic_processor import FacebookPerformanceReporter
 from services.facebook.breakdown_processor import FacebookBreakdownReporter
+from services.facebook.daily_processor2 import FacebookDailyReporterV2
 import logging
 from abc import ABC, abstractmethod
 
@@ -55,6 +56,10 @@ class FacebookAdsWorker(BaseReportWorker):
         """
         logger.info(f"[Job {self.job_id}] Starting Facebook Daily worker")
         
+        reporter = None
+        data = []
+        self.api_rows = 0
+        
         try:
             # Initialize
             self._send_progress("RUNNING", "Initializing Facebook reporter...", 0)
@@ -100,9 +105,13 @@ class FacebookAdsWorker(BaseReportWorker):
             logger.info(f"[Job {self.job_id}] Completed: {len(data)} total rows")
             
             return {
-                "status": "COMPLETED",
+                "status": "SUCCESS",
                 "message": message,
-                "api_usage": {},  # Facebook doesn't track API usage same way
+                "api_usage": {
+                    "summaries" : reporter.summaries,
+                    "batch_count": reporter.batch_count,
+                    "total_backoff_sec": reporter.total_backoff_sec,
+                },  
                 "stats": {
                     "cached_rows": 0,
                     "api_rows": self.api_rows,
@@ -113,7 +122,30 @@ class FacebookAdsWorker(BaseReportWorker):
         except Exception as e:
             spreadsheet_id = self.context.get("spreadsheet_id", "Unknown")
             logger.error(f"[Job {self.job_id}] Error (Spreadsheet: {spreadsheet_id}): {e}", exc_info=True)
-            raise Exception(f"Spreadsheet {spreadsheet_id}: {str(e)}") from e
+            
+            # Construct partial api usage
+            api_usage = {
+                "summaries": {},
+                "batch_count": 0,
+                "total_backoff_sec": 0,
+            }
+            if reporter:
+                api_usage = {
+                    "summaries": reporter.summaries,
+                    "batch_count": reporter.batch_count,
+                    "total_backoff_sec": reporter.total_backoff_sec,
+                }
+
+            return {
+                "status": "FAILED",
+                "message": f"Spreadsheet {spreadsheet_id}: {str(e)}",
+                "api_usage": api_usage,
+                "stats": {
+                    "cached_rows": 0,
+                    "api_rows": self.api_rows,
+                    "total_rows": len(data)
+                }
+            }
         
     
 class FacebookDailyWorker(FacebookAdsWorker):
@@ -121,7 +153,7 @@ class FacebookDailyWorker(FacebookAdsWorker):
     
     def _create_reporter(self):
         """Create Facebook Daily reporter"""
-        return FacebookDailyReporter(
+        return FacebookDailyReporterV2(
             access_token=self.context["access_token"],
             email=self.context.get("user_email", "unknown@example.com"),
             progress_callback=self._send_progress,

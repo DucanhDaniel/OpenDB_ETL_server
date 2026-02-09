@@ -87,7 +87,8 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             **template_config["api_params"],
             "fields": ",".join(final_fields),
             "time_range": json.dumps({"since": chunk["start"], "until": chunk["end"]}),
-            "limit": 200
+            "limit": 1000,
+            "filtering":[{'field':'spend','operator':'GREATER_THAN','value':'0'}]
         }
 
         # --- REMOVE action_report_time if has impression metrics ---
@@ -174,7 +175,7 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
         fields_str += f",{insight_func_str}{{{insight_fields_str}}}"
 
         # Build params
-        params = {"fields": fields_str, "limit": 200}
+        params = {"fields": fields_str, "limit": 200, "filtering":[{'field':'spend','operator':'GREATER_THAN','value':'0'}]}
 
         # Add effective_status filter
         status_filter = EFFECTIVE_STATUS_FILTERS.get(level)
@@ -335,8 +336,9 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
             
             # --- HANDLE ERRORS ---
             if response["status_code"] != 200:
-                if (response["status_code"] == 403 or response["status_code"] == 400):
-                    raise Exception(response["error"]["message"])
+                if response["status_code"] in [400, 403]:
+                    error_msg = response.get("error", {}).get("message", "Unknown Error")
+                    raise Exception(error_msg)
                 
                 self._report_progress(message=f"  ✗ Request thất bại (Code: {response['status_code']})")
                 print(response)
@@ -513,8 +515,17 @@ class FacebookDailyReporter(FacebookAdsBaseReporter):
                     time.sleep(5)
                     continue
                 
-                if "summary" in response_json:
-                    self._perform_backoff_if_needed(response_json["summary"])
+                # backoff retry
+                if hasattr(self, 'backoff_handler'):
+                    self.backoff_handler.analyze_and_backoff(
+                        responses=response_json["results"],
+                        summary=response_json.get("summary")
+                    )
+                else:
+                    # Fallback to old logic if backoff_handler not initialized
+                    if "summary" in response_json:
+                        print("Tồn tại summary: ", response_json["summary"])
+                        self._perform_backoff_if_needed(response_json["summary"])
                 
                 # Process từng result
                 for index, result in enumerate(response_json["results"]):

@@ -99,7 +99,7 @@ class FacebookPerformanceReporter(FacebookAdsBaseReporter):
         fields_str += f",insights.{time_range_param}{{{insight_fields_str}}}"
         
         # Build params
-        params = {"fields": fields_str, "limit": 200}
+        params = {"fields": fields_str, "limit": 500}
         
         # Add effective_status filter
         status_filter = EFFECTIVE_STATUS_FILTERS.get(level)
@@ -361,10 +361,22 @@ class FacebookPerformanceReporter(FacebookAdsBaseReporter):
                             queue.append(item)
                     time.sleep(5)
                     continue
+
+                # backoff retry
+                if hasattr(self, 'backoff_handler'):
+                    self.backoff_handler.analyze_and_backoff(
+                        responses=response_json["results"],
+                        summary=response_json.get("summary")
+                    )
+                else:
+                    # Fallback to old logic if backoff_handler not initialized
+                    if "summary" in response_json:
+                        print("Tồn tại summary: ", response_json["summary"])
+                        self._perform_backoff_if_needed(response_json["summary"])
                 
                 for index, result in enumerate(response_json["results"]):
                     queue_item = current_batch[index]
-                    
+
                     if result["status_code"] == 200 and result.get("data"):
                         rows = self._process_response(
                             result["data"],

@@ -62,8 +62,8 @@ services:
   facebook_batch_server:
     image: phamducanh2k5/fb_batch_request_server:latest
     container_name: facebook_batch_server
-    ports:
-      - "8010:8010" # ONLY FOR TESTING PURPOSES
+    # ports:
+    #   - "8010:8010" # ONLY FOR TESTING PURPOSES
     environment:
       - LOG_DIR=/app/logs
     volumes:

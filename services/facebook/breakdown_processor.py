@@ -248,7 +248,7 @@ class FacebookBreakdownReporter(FacebookAdsBaseReporter):
             if response["status_code"] != 200:
                 error_detail = response.get("error", {})
 
-                if (response["status_code"] == 403 or response["status_code"] == 400):
+                if (response["status_code"] == 403):
                     raise Exception(response["error"]["message"])
 
                 self._report_progress(message=
@@ -321,7 +321,7 @@ class FacebookBreakdownReporter(FacebookAdsBaseReporter):
             logger.info(f"\n➤ Retry batch of {len(current_batch)} items")
             
             try:
-                response_json = self._send_batch_request(batch_urls)
+                response_json = self._send_batch_request(batch_urls)  
                 
                 if not response_json or "results" not in response_json:
                     logger.error("Batch request failed")
@@ -331,6 +331,19 @@ class FacebookBreakdownReporter(FacebookAdsBaseReporter):
                             queue.append(item)
                     time.sleep(5)
                     continue
+
+                # backoff retry
+                if hasattr(self, 'backoff_handler'):
+                    self.backoff_handler.analyze_and_backoff(
+                        responses=response_json["results"],
+                        summary=response_json.get("summary")
+                    )
+                else:
+                    # Fallback to old logic if backoff_handler not initialized
+                    if "summary" in response_json:
+                        print("Tồn tại summary: ", response_json["summary"])
+                        self._perform_backoff_if_needed(response_json["summary"])
+                        
                 
                 for index, result in enumerate(response_json["results"]):
                     queue_item = current_batch[index]
