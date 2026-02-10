@@ -14,6 +14,13 @@ let currentTab = "overview";
 // ================================================================
 // INIT & EVENT LISTENERS
 // ================================================================
+
+function formatDateSafe(dateString) {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleString();
+}
 document.addEventListener('DOMContentLoaded', () => {
     fetchAndRender();
 
@@ -301,7 +308,7 @@ function renderTikTokDashboard(tasks, apiTimeseries) {
     }
 
     // Table
-    renderTasksTable(tkTasks, 'tiktok-tasks-body', ['job_id', 'task_type', 'user_email', 'status', 'duration_seconds']);
+    renderTasksTable(tkTasks, 'tiktok-tasks-body', ['job_id', 'task_type', 'user_email', 'status', 'duration_seconds', 'message']);
 }
 
 // ================================================================
@@ -496,7 +503,7 @@ function openTaskDetail(jobId) {
     document.getElementById('modal-task-meta').innerHTML = `
         <span class="status-${task.status}">${task.status}</span> | 
         ${task.user_email} | 
-        ${new Date(task.start_time).toLocaleString()}
+        ${formatDateSafe(task.start_time)}
     `;
 
     // 2. Parse Data
@@ -508,7 +515,7 @@ function openTaskDetail(jobId) {
     };
 
     summaries.forEach((s, index) => {
-        const label = s.timestamp ? new Date(s.timestamp).toLocaleTimeString() : `Batch ${index + 1}`;
+        const label = s.timestamp ? formatDateSafe(s.timestamp) : `Batch ${index + 1}`;
         currentTaskData.timestamps.push(label);
         currentTaskData.appUsage.push((s.rate_limits?.app_usage_pct || 0) * 100);
 
@@ -520,6 +527,7 @@ function openTaskDetail(jobId) {
                         insightsUsage: [],
                         eta: [],
                         cpuTime: [],
+                        totalTime: [],
                         tier: 'N/A',
                         call_count: 0,
                         max_insights: 0,
@@ -530,22 +538,26 @@ function openTaskDetail(jobId) {
                         currentTaskData.accounts[accId].insightsUsage.push(0);
                         currentTaskData.accounts[accId].eta.push(0);
                         currentTaskData.accounts[accId].cpuTime.push(0);
+                        currentTaskData.accounts[accId].totalTime.push(0);
                     }
                 }
 
                 currentTaskData.accounts[accId].insightsUsage.push(acc.insights_usage_pct || 0);
                 currentTaskData.accounts[accId].eta.push(acc.eta_seconds || 0);
 
-                // CPU Time
+                // CPU Time & Total Time
                 let cpu = 0;
+                let t_time = 0;
                 let tier = currentTaskData.accounts[accId].tier;
                 if (acc.business_use_cases) {
                     acc.business_use_cases.forEach(uc => {
                         cpu += (uc.total_cputime || 0);
+                        t_time += (uc.total_time || 0);
                         if (uc.type === 'ads_insights') tier = uc.ads_api_access_tier;
                     });
                 }
                 currentTaskData.accounts[accId].cpuTime.push(cpu);
+                currentTaskData.accounts[accId].totalTime.push(t_time);
                 currentTaskData.accounts[accId].tier = tier;
 
                 // Aggregates for table
@@ -561,6 +573,7 @@ function openTaskDetail(jobId) {
                     acc.insightsUsage.push(0);
                     acc.eta.push(0);
                     acc.cpuTime.push(0);
+                    acc.totalTime.push(0);
                 }
             });
         }
@@ -621,8 +634,10 @@ function selectAccount(accountId) {
         const metricSelect = document.getElementById('metric-selector');
         if (metricSelect) {
             metricSelect.disabled = false;
-            if (metricSelect.value === 'app_usage') {
-                metricSelect.value = 'insights_usage';
+            metricSelect.disabled = false;
+            // Default to cputime when selecting account
+            if (metricSelect.value === 'app_usage' || metricSelect.value === 'insights_usage') {
+                metricSelect.value = 'time_stats';
                 metricSelect.dispatchEvent(new Event('change'));
             }
         }
@@ -638,35 +653,67 @@ function updateDetailChart() {
     const metric = metricSelect.value;
 
     let labels = currentTaskData.timestamps;
-    let data = [];
-    let label = '';
-    let color = '#e74c3c';
+    let datasets = [];
     let yMax = 100;
 
     if (accountId === 'all') {
-        data = currentTaskData.appUsage;
-        label = 'App Usage PCT (Global)';
-        color = '#e74c3c'; // Red
+        datasets.push({
+            label: 'App Usage PCT (Global)',
+            data: currentTaskData.appUsage,
+            borderColor: '#e74c3c',
+            backgroundColor: hexToRgba('#e74c3c', 0.1),
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2
+        });
     } else {
         const accData = currentTaskData.accounts[accountId];
         if (!accData) return;
 
         switch (metric) {
             case 'insights_usage':
-                data = accData.insightsUsage;
-                label = `Insights Usage PCT (${accountId})`;
-                color = '#3498db'; // Blue
+                datasets.push({
+                    label: `Insights Usage PCT (${accountId})`,
+                    data: accData.insightsUsage,
+                    borderColor: '#3498db',
+                    backgroundColor: hexToRgba('#3498db', 0.1),
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2
+                });
                 break;
             case 'eta':
-                data = accData.eta;
-                label = `ETA Seconds (${accountId})`;
-                color = '#f39c12'; // Orange
+                datasets.push({
+                    label: `ETA Seconds (${accountId})`,
+                    data: accData.eta,
+                    borderColor: '#f39c12',
+                    backgroundColor: hexToRgba('#f39c12', 0.1),
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2
+                });
                 yMax = null; // Auto scale
                 break;
-            case 'cputime':
-                data = accData.cpuTime;
-                label = `Total CPU Time (${accountId})`;
-                color = '#9b59b6'; // Purple
+            case 'time_stats':
+                // Multiple datasets for Time Stats
+                datasets.push({
+                    label: `Total CPU Time (${accountId})`,
+                    data: accData.cpuTime,
+                    borderColor: '#9b59b6', // Purple
+                    backgroundColor: hexToRgba('#9b59b6', 0.1),
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2
+                });
+                datasets.push({
+                    label: `Total Process Time (${accountId})`,
+                    data: accData.totalTime,
+                    borderColor: '#2c3e50', // Dark Blue
+                    backgroundColor: hexToRgba('#2c3e50', 0.1),
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 2
+                });
                 yMax = null;
                 break;
             default:
@@ -681,15 +728,7 @@ function updateDetailChart() {
         type: 'line',
         data: {
             labels: labels,
-            datasets: [{
-                label: label,
-                data: data,
-                borderColor: color,
-                backgroundColor: hexToRgba(color, 0.1),
-                fill: true,
-                tension: 0.3,
-                pointRadius: 2
-            }]
+            datasets: datasets
         },
         options: {
             responsive: true,
@@ -897,43 +936,56 @@ function renderLineChart(canvasId, datasetMap, chartInstance, setChartInstance) 
     setChartInstance(newChart);
 }
 
-function renderTasksTable(tasks, tableBodyId, columns = null) {
-    const tbody = document.getElementById(tableBodyId);
+function formatDateSafe(dateString) {
+    if (!dateString) return '';
+    try {
+        const cleanedDateString = dateString.replace('+00:00', '');
+        const date = new Date(cleanedDateString);
+        if (isNaN(date.getTime())) {
+            return '';
+        }
+        return date.toLocaleString();
+    } catch (e) {
+        console.error("Error formatting date:", e);
+        return '';
+    }
+}
+
+function renderTasksTable(tasks, containerId, columns = null) {
+    const tbody = document.getElementById(containerId);
     if (!tbody) return;
 
-    const displayTasks = tasks.slice(0, 1000);
+    // Default columns for Overview
+    if (!columns) {
+        columns = ['job_id', 'task_type', 'user_email', 'status', 'start_time', 'end_time', 'duration_seconds', 'message'];
+    }
+
+    const displayTasks = tasks.slice(0, 1000); // Limit to 1000 rows
 
     tbody.innerHTML = displayTasks.map(t => {
-        const startTime = t.start_time ? new Date(t.start_time.replace('+00:00', '')).toLocaleString() : '';
-        const endTime = t.end_time ? new Date(t.end_time.replace('+00:00', '')).toLocaleString() : '';
-        const duration = (t.duration_seconds || 0).toFixed(2);
+        const cells = columns.map(col => {
+            let content = t[col];
 
-        // Default Columns
-        if (!columns) {
-            return `
-                <tr>
-                    <td><span title="${t.job_id}" class="job-id">${(t.job_id || '').substring(0, 8)}...</span></td>
-                    <td>${t.task_type}</td>
-                    <td>${t.user_email}</td>
-                    <td class="status-${t.status}">${t.status}</td>
-                    <td>${startTime}</td>
-                    <td>${endTime}</td>
-                    <td>${duration}</td>
-                    <td class="task-message" style="max-width: 300px; white-space: normal; word-wrap: break-word;">${t.message || ''}</td>
-                </tr>
-            `;
-        }
+            // Special formatting
+            if (col === 'job_id') {
+                return `<td><span class="job-id">${(content || '').substring(0, 8)}...</span></td>`;
+            }
+            if (col === 'status') {
+                return `<td class="status-${content}">${content}</td>`;
+            }
+            if (col === 'start_time' || col === 'end_time') {
+                return `<td>${formatDateSafe(content)}</td>`;
+            }
+            if (col === 'duration_seconds') {
+                return `<td>${content ? parseFloat(content).toFixed(2) + 's' : ''}</td>`;
+            }
+            if (col === 'message') {
+                return `<td class="task-message" style="max-width: 300px; white-space: normal; word-wrap: break-word;">${content || ''}</td>`;
+            }
 
-        // Custom Columns (Simplified logic)
-        // Only implementing subset for TikTok view as requested
-        return `
-            <tr>
-                <td><span title="${t.job_id}" class="job-id">${(t.job_id || '').substring(0, 8)}...</span></td>
-                <td>${t.task_type}</td>
-                <td>${t.user_email}</td>
-                <td class="status-${t.status}">${t.status}</td>
-                <td>${duration}</td>
-            </tr>
-        `;
+            return `<td>${content || ''}</td>`;
+        }).join('');
+
+        return `<tr onclick="openTaskDetail('${t.job_id}')" title="Click to view details">${cells}</tr>`;
     }).join('');
 }
