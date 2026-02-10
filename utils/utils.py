@@ -71,8 +71,8 @@ def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer)
         logger.warning(f"[Job {job_id}] No selected_fields. Using all {len(headers)} available fields")
     
     # ========== CHUNKED WRITING STRATEGY ==========
-    # Large datasets (>1000 rows) được chia thành chunks
-    CHUNK_SIZE = 1000
+    # Large datasets (>10000 rows) được chia thành chunks
+    CHUNK_SIZE = 10000
     total_rows = len(flattened_data)
     
     if total_rows <= CHUNK_SIZE:

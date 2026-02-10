@@ -623,7 +623,7 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         
         # Prepare date chunks
         if (template_name == "LOCATION_DETAILED_REPORT" or template_name == "AGE & GENDER_DETAILED_REPORT"):
-            date_chunks = self._generate_monthly_date_chunks(start_date, end_date, factor = 3)
+            date_chunks = self._generate_monthly_date_chunks(start_date, end_date, factor = 6)
         else:
             date_chunks = self._generate_monthly_date_chunks(start_date, end_date, factor = 2)
         
@@ -745,22 +745,20 @@ if __name__ == "__main__":
     )
     
     # Template config example
-    template_name = "AGE & GENDER_DETAILED_REPORT"
+    template_name = "LOCATION_DETAILED_REPORT"
     accounts = [
-        {"id": "act_948290596967304", "name": "25. Cara Luna 02 - "}
+        {"id": "act_650248897235348", "name": "Cara Luna 02"}
     ]
     
     data = reporter.get_report(
         accounts_to_process=accounts,
-        start_date="2025-12-31",
+        start_date="2025-12-01",
         end_date="2025-12-31",
         template_name=template_name,
-        selected_fields=["date_start", "date_stop", "account_id", "account_name", "campaign_name", "adset_name", "ad_name", "id", "adset_bid_strategy", "adset_bid_amount", 
-"age", "gender", "creative_id", "creative_name", "creative_thumbnail_url", "creative_link", "spend", "impressions", "reach", "clicks", 
-"cpc", "cpm", "ctr", "frequency", "inline_link_clicks", "unique_inline_link_clicks", "outbound_clicks", "unique_outbound_clicks", "inline_link_click_ctr", "outbound_click_ctr", 
-"Messaging conversations started", "New messaging contacts", "Cost per messaging conversation started", "Post engagements", "Post reactions", "Post comments", "Post saves", "Post shares", "Photo views", "Landing page views", 
-"Cost per landing page view", "ThruPlay", "Chi phí / ThruPlay", "Video Views (25%)", "Video Views (50%)", "Video Views (75%)", "Video Views (95%)", "Video Views (100%)"
-]
+        selected_fields=["date_start", "date_stop", "account_id", "account_name", "campaign_name", "adset_name", "ad", "id", "adset_bid_strategy", "adset_bid_amount", 
+"country", "region", "creative_id", "creative_name", "creative_thumbnail_url", "spend", "impressions", "reach", "clicks", "cpc", 
+"cpm", "ctr", "frequency", "inline_link_clicks", "outbound_clicks", "Messaging conversations started", "New messaging contacts", "Cost per messaging conversation started", "Post engagements", "Post reactions", 
+"Post comments", "Post saves", "Post shares", "Landing page views", "Cost per landing page view", "Video Plays", "ThruPlays", "Photo views"]
     )
     
     print(f"Got {len(data)} rows")

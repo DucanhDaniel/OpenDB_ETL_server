@@ -357,7 +357,7 @@ function renderFacebookDashboard(tasks) {
     fbTasks.forEach(t => {
         const summaries = t.api_total_counts?.summaries || [];
         summaries.forEach(s => {
-            const appUsage = s.rate_limits?.app_usage_pct || 0;
+            const appUsage = (s.rate_limits?.app_usage_pct || 0) * 100;
             if (appUsage >= 95) usageBuckets['Critical (>95%)']++;
             else if (appUsage >= 75) usageBuckets['Warning (75-95%)']++;
             else usageBuckets['Safe (<75%)']++;
@@ -510,7 +510,7 @@ function openTaskDetail(jobId) {
     summaries.forEach((s, index) => {
         const label = s.timestamp ? new Date(s.timestamp).toLocaleTimeString() : `Batch ${index + 1}`;
         currentTaskData.timestamps.push(label);
-        currentTaskData.appUsage.push(s.rate_limits?.app_usage_pct || 0);
+        currentTaskData.appUsage.push((s.rate_limits?.app_usage_pct || 0) * 100);
 
         if (s.rate_limits?.account_details) {
             s.rate_limits.account_details.forEach(acc => {
@@ -590,7 +590,7 @@ function openTaskDetail(jobId) {
     // 5. Render Account List
     const tbody = document.getElementById('modal-account-list');
     tbody.innerHTML = Object.entries(currentTaskData.accounts).map(([id, data]) => `
-        <tr>
+        <tr onclick="selectAccount('${id}')" style="cursor: pointer;" title="Click to view chart for this account">
             <td>${id}</td>
             <td>${data.max_insights}%</td>
             <td>${data.max_eta > 0 ? `<strong style="color:red">${data.max_eta}</strong>` : '0'}</td>
@@ -606,6 +606,27 @@ function openTaskDetail(jobId) {
     const span = modal.querySelector(".close-modal");
     span.onclick = function () { modal.style.display = "none"; }
     window.onclick = function (event) { if (event.target == modal) modal.style.display = "none"; }
+}
+
+
+function selectAccount(accountId) {
+    const accSelect = document.getElementById('account-selector');
+    if (accSelect) {
+        accSelect.value = accountId;
+        // Trigger change event to update chart
+        const event = new Event('change');
+        accSelect.dispatchEvent(event);
+
+        // Update metric selector to insights if switching to specific account
+        const metricSelect = document.getElementById('metric-selector');
+        if (metricSelect) {
+            metricSelect.disabled = false;
+            if (metricSelect.value === 'app_usage') {
+                metricSelect.value = 'insights_usage';
+                metricSelect.dispatchEvent(new Event('change'));
+            }
+        }
+    }
 }
 
 function updateDetailChart() {

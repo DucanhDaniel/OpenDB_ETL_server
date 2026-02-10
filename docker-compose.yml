@@ -38,7 +38,7 @@ services:
     container_name: tiktok_api_server
     command: gunicorn -w 5 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8011
     volumes:
-      - .:/app  # Đồng bộ code local vào container, thay đổi code là server tự reload
+      - .:/app # Đồng bộ code local vào container, thay đổi code là server tự reload
     ports:
       - "8011:8011"
     env_file:
@@ -49,28 +49,28 @@ services:
   # Dịch vụ Celery Worker
   worker:
     build: .
-    container_name: tiktok_celery_worker
+    container_name: celery_worker
     # command: celery -A celery_worker.celery_app worker -P gevent --loglevel=info
     command: celery -A workers.tasks_modular.celery_app worker --loglevel=info
     volumes:
-      - .:/app  
+      - .:/app
     env_file:
       - .env
     depends_on:
-      - redis 
+      - redis
 
   facebook_batch_server:
     image: phamducanh2k5/fb_batch_request_server:latest
     container_name: facebook_batch_server
-    # ports:
-    #   - "8010:8010" # ONLY FOR TESTING PURPOSES
+    ports:
+      - "8010:8010" # ONLY FOR TESTING PURPOSES
     environment:
       - LOG_DIR=/app/logs
     volumes:
       - ./logs:/app/logs
       - ./static:/app/static
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8010/health || exit 1"]
+      test: [ "CMD-SHELL", "curl -f http://localhost:8010/health || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
