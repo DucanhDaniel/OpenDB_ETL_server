@@ -275,26 +275,29 @@ class FacebookPerformanceReporter(FacebookAdsBaseReporter):
             request_metadata = response["metadata"]
             
             # Handle errors với logging chi tiết
-            if response["status_code"] != 200:
-                error_detail = response.get("error", {})
-                if (response["status_code"] == 403 or response["status_code"] == 400):
-                    raise Exception(response["error"]["message"])
-                
-                self._report_progress(message = 
-                    "\n  ✗ Request thất bại:"
-                    + f"\n     Status Code: {response['status_code']}"
-                    + f"\n     URL: {response.get('original_url', 'N/A')}"
-                    + f"\n     Error Message: {error_detail.get('message', 'Unknown error')}"
-                    + f"\n     Error Type: {error_detail.get('type', 'N/A')}"
-                    + f"\n     Error Code: {error_detail.get('code', 'N/A')}"
-                )
-                
-                if 500 <= response["status_code"] < 600:
-                    failed_requests.append({
-                        "url": response["original_url"],
-                        "metadata": request_metadata
-                    })
-                continue
+            try:
+                if response["status_code"] != 200:
+                    error_detail = response.get("error", {})
+                    if (response["status_code"] == 403 or response["status_code"] == 400):
+                        raise Exception(response["error"]["message"])
+                    
+                    self._report_progress(message = 
+                        "\n  ✗ Request thất bại:"
+                        + f"\n     Status Code: {response['status_code']}"
+                        + f"\n     URL: {response.get('original_url', 'N/A')}"
+                        + f"\n     Error Message: {error_detail.get('message', 'Unknown error')}"
+                        + f"\n     Error Type: {error_detail.get('type', 'N/A')}"
+                        + f"\n     Error Code: {error_detail.get('code', 'N/A')}"
+                    )
+                    
+                    if 500 <= response["status_code"] < 600:
+                        failed_requests.append({
+                            "url": response["original_url"],
+                            "metadata": request_metadata
+                        })
+                    continue
+            except Exception as e:
+                raise Exception(f"  ✗ Error processing response: {response}")
             
             response_body = response.get("data")
             if not response_body:
