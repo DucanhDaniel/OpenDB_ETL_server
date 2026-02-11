@@ -341,7 +341,7 @@ class FacebookBreakdownReporter(FacebookAdsBaseReporter):
                 else:
                     # Fallback to old logic if backoff_handler not initialized
                     if "summary" in response_json:
-                        print("Tồn tại summary: ", response_json["summary"])
+                        # print("Tồn tại summary: ", response_json["summary"])
                         self._perform_backoff_if_needed(response_json["summary"])
                         
                 

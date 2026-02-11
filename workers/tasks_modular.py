@@ -10,6 +10,7 @@ from celery.signals import task_prerun, task_postrun
 from typing import Dict, Any
 import os
 from datetime import datetime, timezone
+import io
 
 from .worker_factory import WorkerFactory
 from services.exceptions import TaskCancelledException 
@@ -183,6 +184,31 @@ def run_report_job(context: Dict[str, Any]):
     
     # Khởi tạo sheet writer
     writer = GoogleSheetWriter(CREDENTIALS_PATH, spreadsheet_id)
+
+    # --- SETUP LOG CAPTURE ---
+    log_capture_string = io.StringIO()
+    ch = logging.StreamHandler(log_capture_string)
+    ch.setLevel(logging.INFO)
+    
+    # Add handler to root logger to capture everything
+    root_logger = logging.getLogger()
+    root_logger.addHandler(ch)
+
+    # Helper to save logs to DB
+    def save_logs_to_db():
+        try:
+            log_contents = log_capture_string.getvalue()
+            if db_client:
+
+                print("Saving logs to DB...JobId: ", job_id)
+
+                db_client.db.task_logs.update_one(
+                    {"job_id": job_id},
+                    {"$set": {"full_logs": log_contents}}
+                )
+        except Exception as e:
+            logger.error(f"[Job {job_id}] Failed to save logs to DB: {e}")
+
     
     def send_progress_update(status: str, message: str, progress: int = 0):
         """Callback function để ghi progress vào sheet"""
@@ -251,6 +277,16 @@ def run_report_job(context: Dict[str, Any]):
         logger.error(f"[Job {job_id}] Error during processing: {e}", exc_info=True)
         send_progress_update("FAILED", str(e))
         raise
+    
+    finally:
+        # --- CLEANUP LOG CAPTURE ---
+        try:
+            save_logs_to_db()
+            root_logger.removeHandler(ch)
+            ch.close()
+            log_capture_string.close()
+        except Exception:
+            pass
 
 
 # ==================== HELPER FUNCTIONS ====================

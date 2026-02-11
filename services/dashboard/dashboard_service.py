@@ -21,6 +21,18 @@ def get_task_logs_from_db(db_client: MongoDbClient) -> List[Dict]:
         logger.error(f"Error fetching task logs: {e}")
         return []
 
+def get_task_log(db_client: MongoDbClient, job_id: str) -> str:
+    """Lấy full log của một job cụ thể."""
+    if not db_client: return ""
+    try:
+        task = db_client.db.task_logs.find_one({"job_id": job_id}, {"full_logs": 1})
+        if task:
+            return task.get("full_logs", "")
+        return "Log not found."
+    except Exception as e:
+        logger.error(f"Error fetching log for job {job_id}: {e}")
+        return f"Error fetching logs: {str(e)}"
+
 def get_api_total_counts(redis_client: redis.Redis) -> Dict[str, int]:
     """Lấy tổng số lần gọi API từ Redis."""
     if not redis_client: return {}

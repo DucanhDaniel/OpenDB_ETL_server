@@ -244,7 +244,7 @@ class FacebookAdsBaseReporter:
                     self.summaries.append(summary_with_time)
                 
                 if hasattr(self, 'backoff_handler'):
-                    print("Tồn tại summary: ", response_json["summary"])
+                    # print("Tồn tại summary: ", response_json["summary"])
                     self.total_backoff_sec += self.backoff_handler.analyze_and_backoff(
                         responses=responses_with_metadata,
                         summary=response_json.get("summary")
@@ -252,7 +252,7 @@ class FacebookAdsBaseReporter:
                 else:
                     # Fallback to old logic if backoff_handler not initialized
                     if "summary" in response_json:
-                        print("Tồn tại summary: ", response_json["summary"])
+                        # print("Tồn tại summary: ", response_json["summary"])
                         self._perform_backoff_if_needed(response_json["summary"])
                 
                 return responses_with_metadata

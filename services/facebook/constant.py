@@ -1344,7 +1344,7 @@ FACEBOOK_REPORT_TEMPLATES_STRUCTURE = [
             ],
             "6. Video & Landing Page": [
                 "Landing page views", "Cost per landing page view",
-                "Video Plays", "ThruPlays", "Photo views"
+                "Video Plays", "ThruPlay", "Photo views"
             ]
           },
           "ad_fields": [

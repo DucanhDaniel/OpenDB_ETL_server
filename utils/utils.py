@@ -46,7 +46,7 @@ def write_data_to_sheet(job_id, spreadsheet_id, context, flattened_data, writer)
     Returns:
         Success message
     """
-    logger.info(f"Context writing: {context}")
+    # logger.info(f"Context writing: {context}")
     if not spreadsheet_id:
         raise ValueError("Chưa có spreadsheet_id.")
     

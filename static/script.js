@@ -511,6 +511,8 @@ function openTaskDetail(jobId) {
     currentTaskData = {
         timestamps: [],
         appUsage: [],
+        globalMaxCpu: [],      // NEW
+        globalMaxTotalTime: [], // NEW
         accounts: {}
     };
 
@@ -519,9 +521,14 @@ function openTaskDetail(jobId) {
         currentTaskData.timestamps.push(label);
         currentTaskData.appUsage.push((s.rate_limits?.app_usage_pct || 0) * 100);
 
+        let maxCpuInBatch = 0;
+        let maxTotalTimeInBatch = 0;
+
         if (s.rate_limits?.account_details) {
             s.rate_limits.account_details.forEach(acc => {
                 const accId = acc.account_id;
+
+                // Initialize account data if new
                 if (!currentTaskData.accounts[accId]) {
                     currentTaskData.accounts[accId] = {
                         insightsUsage: [],
@@ -533,7 +540,7 @@ function openTaskDetail(jobId) {
                         max_insights: 0,
                         max_eta: 0
                     };
-                    // Fill gaps for previous timestamps if this account wasn't seen
+                    // Backfill zeros
                     for (let i = 0; i < currentTaskData.timestamps.length - 1; i++) {
                         currentTaskData.accounts[accId].insightsUsage.push(0);
                         currentTaskData.accounts[accId].eta.push(0);
@@ -545,10 +552,11 @@ function openTaskDetail(jobId) {
                 currentTaskData.accounts[accId].insightsUsage.push(acc.insights_usage_pct || 0);
                 currentTaskData.accounts[accId].eta.push(acc.eta_seconds || 0);
 
-                // CPU Time & Total Time
+                // CPU & Time
                 let cpu = 0;
                 let t_time = 0;
                 let tier = currentTaskData.accounts[accId].tier;
+
                 if (acc.business_use_cases) {
                     acc.business_use_cases.forEach(uc => {
                         cpu += (uc.total_cputime || 0);
@@ -560,38 +568,55 @@ function openTaskDetail(jobId) {
                 currentTaskData.accounts[accId].totalTime.push(t_time);
                 currentTaskData.accounts[accId].tier = tier;
 
-                // Aggregates for table
+                // Aggregates
                 currentTaskData.accounts[accId].max_insights = Math.max(currentTaskData.accounts[accId].max_insights, acc.insights_usage_pct || 0);
                 currentTaskData.accounts[accId].max_eta = Math.max(currentTaskData.accounts[accId].max_eta, acc.eta_seconds || 0);
-                currentTaskData.accounts[accId].call_count++; // Simple batch count participation
-            });
+                currentTaskData.accounts[accId].call_count++;
 
-            // Fill gaps for accounts not present in this summary
-            Object.keys(currentTaskData.accounts).forEach(accId => {
-                const acc = currentTaskData.accounts[accId];
-                if (acc.insightsUsage.length < currentTaskData.timestamps.length) {
-                    acc.insightsUsage.push(0);
-                    acc.eta.push(0);
-                    acc.cpuTime.push(0);
-                    acc.totalTime.push(0);
-                }
+                // Track global max for this batch
+                maxCpuInBatch = Math.max(maxCpuInBatch, cpu);
+                maxTotalTimeInBatch = Math.max(maxTotalTimeInBatch, t_time);
             });
         }
+
+        // Push global maxes for this timestamp
+        currentTaskData.globalMaxCpu.push(maxCpuInBatch);
+        currentTaskData.globalMaxTotalTime.push(maxTotalTimeInBatch);
+
+        // Fill gaps for accounts not present in this summary
+        Object.keys(currentTaskData.accounts).forEach(accId => {
+            const acc = currentTaskData.accounts[accId];
+            if (acc.insightsUsage.length < currentTaskData.timestamps.length) {
+                acc.insightsUsage.push(0);
+                acc.eta.push(0);
+                acc.cpuTime.push(0);
+                acc.totalTime.push(0);
+            }
+        });
     });
 
     // 3. Populate Selectors
     const accSelect = document.getElementById('account-selector');
     const metricSelect = document.getElementById('metric-selector');
 
-    accSelect.innerHTML = '<option value="all">All Accounts (App Usage)</option>';
+    // Enable metric selector (it starts disabled in HTML)
+    metricSelect.disabled = false;
+
+    accSelect.innerHTML = '<option value="all">All Accounts</option>';
     Object.keys(currentTaskData.accounts).forEach(accId => {
         accSelect.innerHTML += `<option value="${accId}">${accId}</option>`;
     });
 
     accSelect.onchange = () => {
         const isAll = accSelect.value === 'all';
-        metricSelect.disabled = isAll;
-        metricSelect.value = isAll ? 'app_usage' : 'insights_usage'; // Reset metric on mode switch
+        // Allow metric selection even for 'all' to show global max charts
+        // If 'all' is selected, default to 'app_usage' IF the current metric is account-specific (like eta/insights)
+        // But if user wants to see global time stats, let them.
+
+        if (isAll && (metricSelect.value === 'insights_usage' || metricSelect.value === 'eta')) {
+            metricSelect.value = 'app_usage';
+        }
+
         updateDetailChart();
     };
 
@@ -600,15 +625,18 @@ function openTaskDetail(jobId) {
     // 4. Render Initial View
     updateDetailChart();
 
-    // 5. Render Account List
+    // 5. Render Account List (SORTED BY CALL COUNT DESC)
+    const sortedAccounts = Object.entries(currentTaskData.accounts)
+        .sort((a, b) => b[1].call_count - a[1].call_count); // Sort by call_count DESC
+
     const tbody = document.getElementById('modal-account-list');
-    tbody.innerHTML = Object.entries(currentTaskData.accounts).map(([id, data]) => `
+    tbody.innerHTML = sortedAccounts.map(([id, data]) => `
         <tr onclick="selectAccount('${id}')" style="cursor: pointer;" title="Click to view chart for this account">
             <td>${id}</td>
             <td>${data.max_insights}%</td>
             <td>${data.max_eta > 0 ? `<strong style="color:red">${data.max_eta}</strong>` : '0'}</td>
             <td>${data.tier}</td>
-            <td>${data.call_count}</td>
+            <td><strong>${data.call_count}</strong></td>
         </tr>
     `).join('');
 
@@ -616,9 +644,51 @@ function openTaskDetail(jobId) {
     const modal = document.getElementById('task-detail-modal');
     modal.style.display = "block";
 
+    // ... (Log Viewer logic remains same) ...
+    // Reset Log View
+    const logContainer = document.getElementById('log-container');
+    const logContent = document.getElementById('log-content');
+    const btnViewLogs = document.getElementById('btn-view-logs');
+
+    if (logContainer) logContainer.style.display = 'none';
+    if (logContent) logContent.textContent = '';
+    if (btnViewLogs) {
+        btnViewLogs.textContent = 'View Full Logs';
+        // Remove old listeners by cloning
+        const newBtn = btnViewLogs.cloneNode(true);
+        btnViewLogs.parentNode.replaceChild(newBtn, btnViewLogs);
+
+        newBtn.addEventListener('click', () => {
+            if (logContainer.style.display === 'none') {
+                fetchTaskLogs(jobId);
+                logContainer.style.display = 'block';
+                newBtn.textContent = 'Hide Logs';
+            } else {
+                logContainer.style.display = 'none';
+                newBtn.textContent = 'View Full Logs';
+            }
+        });
+    }
+
     const span = modal.querySelector(".close-modal");
     span.onclick = function () { modal.style.display = "none"; }
     window.onclick = function (event) { if (event.target == modal) modal.style.display = "none"; }
+}
+
+async function fetchTaskLogs(jobId) {
+    const logContent = document.getElementById('log-content');
+    logContent.textContent = 'Loading logs...';
+
+    try {
+        const response = await fetch(`/api/dashboard/logs/${jobId}`);
+        if (!response.ok) throw new Error('Failed to fetch logs');
+
+        const data = await response.json();
+        logContent.textContent = data.logs || 'No logs found.';
+    } catch (error) {
+        console.error('Error fetching logs:', error);
+        logContent.textContent = `Error loading logs: ${error.message}`;
+    }
 }
 
 
@@ -630,17 +700,10 @@ function selectAccount(accountId) {
         const event = new Event('change');
         accSelect.dispatchEvent(event);
 
-        // Update metric selector to insights if switching to specific account
+        // Update metric selector to time_stats or something specific
         const metricSelect = document.getElementById('metric-selector');
-        if (metricSelect) {
-            metricSelect.disabled = false;
-            metricSelect.disabled = false;
-            // Default to cputime when selecting account
-            if (metricSelect.value === 'app_usage' || metricSelect.value === 'insights_usage') {
-                metricSelect.value = 'time_stats';
-                metricSelect.dispatchEvent(new Event('change'));
-            }
-        }
+        // If we were on global app usage, maybe switch to something else? 
+        // For now keep user selection unless invalid.
     }
 }
 
@@ -652,25 +715,78 @@ function updateDetailChart() {
     const accountId = accSelect.value;
     const metric = metricSelect.value;
 
+    // Disable irrelevant metrics for 'all'
+    // insights_usage and eta are strictly per-account (or maybe avg/max global? user asked for cpu/time specifically)
+    // We'll hide/disable options that don't make sense if needed, but let's just handle rendering.
+
+    // Enable all options in logic, handle 'all' case in switch
+
+    Array.from(metricSelect.options).forEach(opt => {
+        if (accountId === 'all') {
+            if (opt.value === 'insights_usage' || opt.value === 'eta') opt.disabled = true;
+            else opt.disabled = false;
+        } else {
+            opt.disabled = false;
+        }
+    });
+
+
     let labels = currentTaskData.timestamps;
     let datasets = [];
     let yMax = 100;
 
     if (accountId === 'all') {
-        datasets.push({
-            label: 'App Usage PCT (Global)',
-            data: currentTaskData.appUsage,
-            borderColor: '#e74c3c',
-            backgroundColor: hexToRgba('#e74c3c', 0.1),
-            fill: true,
-            tension: 0.3,
-            pointRadius: 2
-        });
+        if (metric === 'app_usage') {
+            datasets.push({
+                label: 'App Usage PCT (Global)',
+                data: currentTaskData.appUsage,
+                borderColor: '#e74c3c',
+                backgroundColor: hexToRgba('#e74c3c', 0.1),
+                fill: true,
+                tension: 0.3,
+                pointRadius: 2
+            });
+        } else if (metric === 'time_stats') {
+            // SHOW MAX GLOBAL CPU/TIME
+            datasets.push({
+                label: 'Max CPU Time (Across All Accounts)',
+                data: currentTaskData.globalMaxCpu,
+                borderColor: '#9b59b6', // Purple
+                backgroundColor: hexToRgba('#9b59b6', 0.1),
+                fill: false,
+                tension: 0.3,
+                pointRadius: 2
+            });
+            datasets.push({
+                label: 'Max Process Time (Across All Accounts)',
+                data: currentTaskData.globalMaxTotalTime,
+                borderColor: '#2c3e50', // Dark Blue
+                backgroundColor: hexToRgba('#2c3e50', 0.1),
+                fill: false,
+                tension: 0.3,
+                pointRadius: 2
+            });
+            yMax = null; // Auto scale
+        }
     } else {
         const accData = currentTaskData.accounts[accountId];
         if (!accData) return;
 
         switch (metric) {
+            case 'app_usage':
+                // Even for single account, showing Global App Usage as reference is often useful, 
+                // or we show nothing? The prompt didn't specify. 
+                // Let's show Global App Usage as context.
+                datasets.push({
+                    label: 'App Usage PCT (Global)',
+                    data: currentTaskData.appUsage,
+                    borderColor: '#e74c3c',
+                    backgroundColor: hexToRgba('#e74c3c', 0.1),
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 2
+                });
+                break;
             case 'insights_usage':
                 datasets.push({
                     label: `Insights Usage PCT (${accountId})`,
@@ -741,7 +857,7 @@ function updateDetailChart() {
                 }
             },
             plugins: {
-                annotation: (accountId === 'all' || metric === 'insights_usage') ? {
+                annotation: (metric === 'insights_usage') ? {
                     annotations: {
                         line1: {
                             type: 'line',

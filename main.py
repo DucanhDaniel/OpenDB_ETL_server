@@ -38,7 +38,7 @@ async def read_root():
 
 # --- API Endpoints ---
 
-from services.dashboard.dashboard_service import get_dashboard_data
+from services.dashboard.dashboard_service import get_dashboard_data, get_task_log
 
 @app.get("/api/dashboard", tags=["Dashboard"])
 def dashboard_endpoint():
@@ -54,6 +54,23 @@ def dashboard_endpoint():
     except Exception as e:
         logger.error(f"Lỗi khi truy vấn dashboard data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Lỗi server khi lấy dữ liệu: {e}")
+
+
+@app.get("/api/dashboard/logs/{job_id}", tags=["Dashboard"])
+def get_logs_endpoint(job_id: str):
+    """
+    Lấy full log của một job cụ thể.
+    """
+    if not db_client:
+        raise HTTPException(status_code=503, detail="Database connection is unavailable.")
+    
+    try:
+        logs = get_task_log(db_client, job_id)
+        return {"job_id": job_id, "logs": logs}
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy log cho job {job_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Lỗi server: {e}")
+
 
 
 
