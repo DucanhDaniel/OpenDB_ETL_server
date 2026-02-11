@@ -32,6 +32,17 @@ services:
     volumes:
       - redis-data:/data
 
+  nginx:
+    image: nginx:latest
+    container_name: nginx_gatekeeper
+    ports:
+      - "8011:8011" # Nhận request từ bên ngoài vào qua cổng 8011
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./.htpasswd:/etc/nginx/.htpasswd:ro
+    depends_on:
+      - api
+
   # Dịch vụ FastAPI API
   api:
     build: .
@@ -39,8 +50,8 @@ services:
     command: gunicorn -w 5 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8011
     volumes:
       - .:/app # Đồng bộ code local vào container, thay đổi code là server tự reload
-    ports:
-      - "8011:8011"
+    expose:
+      - "8011"
     env_file:
       - .env
     depends_on:
