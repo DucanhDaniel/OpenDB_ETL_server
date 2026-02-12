@@ -54,13 +54,13 @@ class BaseReportWorker(ABC):
         self.cached_rows = 0
         self.api_rows = 0
     
-    def _send_progress(self, status: str, message: str, progress: int = 0):
+    def _send_progress(self, status: str, message: str, progress: int = 0, api_usage: Dict = None):
         """Send progress update"""
         if status == "STOPPED":
             return
         
         try:
-            self.progress_callback(status, message, progress)
+            self.progress_callback(status, message, progress, api_usage)
         except Exception as e:
             logger.warning(f"[Job {self.job_id}] Could not log progress: {e}")
     

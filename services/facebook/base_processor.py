@@ -74,8 +74,16 @@ class FacebookAdsBaseReporter:
         
     def _report_progress(self, message: str, percentage: int = None):
         """Report progress nếu có callback"""
+        api_usage = {
+            "summaries" : self.summaries,
+            "batch_count": self.batch_count,
+            "total_backoff_sec": self.total_backoff_sec,
+            "total_rows_written": self.total_rows_written,
+            "request_count": self.request_count
+        }
+
         if self.progress_callback:
-            self.progress_callback(status = "RUNNING", message = message, progress = percentage)
+            self.progress_callback(status = "RUNNING", message = message, progress = percentage, api_usage = api_usage)
         
         # Log with job_id prefix if available
         prefix = f"[Job {self.job_id}] " if self.job_id else ""
@@ -177,7 +185,8 @@ class FacebookAdsBaseReporter:
                 }
             }
         """
-        print(relative_urls)
+        logger.info(relative_urls)
+
         if not request_id:
             request_id = f"req_{int(time.time())}"
         
@@ -221,7 +230,7 @@ class FacebookAdsBaseReporter:
         """
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
-                logger.info(f"  → Gửi batch {batch_number} ({len(urls_for_batch)} requests)...")
+                self._report_progress(f"  → Gửi batch {batch_number} ({len(urls_for_batch)} requests)...")
                 
                 response_json = self._send_batch_request(urls_for_batch)
                 

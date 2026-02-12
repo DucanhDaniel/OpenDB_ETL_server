@@ -210,11 +210,23 @@ def run_report_job(context: Dict[str, Any]):
             logger.error(f"[Job {job_id}] Failed to save logs to DB: {e}")
 
     
-    def send_progress_update(status: str, message: str, progress: int = 0):
+    def send_progress_update(status: str, message: str, progress: int = 0, api_usage: Dict = None):
         """Callback function để ghi progress vào sheet"""
         if status == "STOPPED":
             return
         try:
+            save_logs_to_db()
+            
+            # Save API usage to DB if available
+            if api_usage and db_client:
+                try:
+                    db_client.db.task_logs.update_one(
+                        {"job_id": job_id},
+                        {"$set": {"api_total_counts": api_usage}}
+                    )
+                except Exception as e:
+                    logger.warning(f"[Job {job_id}] Failed to update api_usage: {e}")
+
             writer.log_progress(task_id, status, message, progress)
         except Exception as e:
             logger.warning(f"[Job {job_id}] Could not log progress: {e}")
@@ -261,6 +273,7 @@ def run_report_job(context: Dict[str, Any]):
         # ========== BƯỚC 4: Gửi final callback SUCCESS ==========
         logger.info(f"[Job {job_id}] Completed successfully")
         send_progress_update("COMPLETED", final_message, 100)
+        writer.update_task_history(task_id, "COMPLETED", final_message)
         
         return {
             "status": "SUCCESS",

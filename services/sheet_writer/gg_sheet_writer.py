@@ -376,6 +376,45 @@ class GoogleSheetWriter:
         except Exception as e:
             logger.error(f"ERROR: Không thể ghi log cho task {task_id}: {e}")
             # Don't raise - logging failure shouldn't stop the job
+
+    def update_task_history(self, task_id, status, message):
+        try:
+            worksheet = self._get_or_create_worksheet('hidden_task_history_log')
+
+            # Get column A (taskId) to find the row
+            def _get_task_ids():
+                return worksheet.col_values(1)
+            
+            task_ids = self._retry_operation(_get_task_ids, "Get task IDs")
+            
+            # Find row index (1-based)
+            row_index = -1
+            str_task_id = str(task_id)
+            
+            for idx, val in enumerate(task_ids):
+                if str(val) == str_task_id:
+                    row_index = idx + 1
+                    break
+            
+            if row_index != -1:
+                # Update status (Column E) and message (Column F)
+                # Headers: taskId(A), timestamp(B), description(C), runType(D), status(E), message(F)
+                
+                def _update_status():
+                    return worksheet.update(
+                        range_name=f'E{row_index}:F{row_index}',
+                        values=[[status, message]],
+                        value_input_option='USER_ENTERED'
+                    )
+                
+                self._retry_operation(_update_status, f"Update history for {task_id}")
+                logger.info(f"Updated history for task {task_id}: {status} - {message}")
+            else:
+                logger.warning(f"Task ID {task_id} not found in hidden_task_history_log")
+
+        except Exception as e:
+            logger.error(f"ERROR: Không thể cập nhật history cho task {task_id}: {e}")
+
             
     def _create_image_formula(self, url: str) -> str:
         """Chuyển URL thành =IMAGE() formula"""

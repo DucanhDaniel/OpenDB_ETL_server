@@ -5,8 +5,8 @@ services:
     image: mongo:latest
     container_name: my-mongo-db
     restart: always
-    ports:
-      - "127.0.0.1:27018:27017"
+    # ports:
+    #   - "127.0.0.1:27018:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
@@ -73,8 +73,8 @@ services:
   facebook_batch_server:
     image: phamducanh2k5/fb_batch_request_server:latest
     container_name: facebook_batch_server
-    ports:
-      - "8010:8010" # ONLY FOR TESTING PURPOSES
+    # ports:
+    #   - "8010:8010" # ONLY FOR TESTING PURPOSES
     environment:
       - LOG_DIR=/app/logs
     volumes:
