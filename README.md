@@ -1,6 +1,6 @@
-# TikTok OpenDB Server
+# Marketing ETL Pipeline
 
-This repository contains the backend server for the TikTok OpenDB project, providing a reporting API, dashboard for monitoring, and asynchronous job processing capabilities.
+This repository contains the backend server for the Marketing ETL Pipeline project, providing a reporting API, dashboard for monitoring, and asynchronous job processing capabilities.
 
 ## 🚀 Features
 
@@ -32,7 +32,7 @@ This repository contains the backend server for the TikTok OpenDB project, provi
 1.  **Clone the repository:**
     ```bash
     git clone <repository-url>
-    cd Tiktok_OpenDB_server
+    cd Marketing_ETL_Pipeline
     ```
 
 2.  **Environment Configuration:**
@@ -45,6 +45,16 @@ This repository contains the backend server for the TikTok OpenDB project, provi
     *   `REDIS_HOST`
     *   `GOOGLE_CREDENTIALS_PATH`
 
+3. **Running with Docker Compose**
+
+    ```bash
+    docker-compose up -d --build
+    ```
+
+4.  **Access the Application:**
+    -   **API**: `http://localhost:8011`
+    -   **Dashboard**: `http://localhost:8011/dashboard`
+    -   **API Docs**: `http://localhost:8011/docs`
 ### Google Sheets Integration Setup
 
 To enable the application to write reports to Google Sheets, follow these steps:
@@ -68,6 +78,8 @@ To enable the application to write reports to Google Sheets, follow these steps:
     *   Click the **Share** button.
     *   Paste the `client_email` address and give it **Editor** access.
     *   **Note:** The application will fail to write data if the service account does not have edit access to the destination sheet.
+
+
 
 ## 📖 API Documentation
 
@@ -153,8 +165,8 @@ For reports broken down by dimensions like Age, Gender, Region, etc.
 | `Campaign Performance by Platform` | Breakdown by Publisher Platform & Position | Campaign |
 | `Campaign Performance by Region` | Breakdown by Region | Campaign |
 | `Campaign Performance by Hour (Audience Time)` | Hourly breakdown | Campaign |
-| `AGE & GENDER_DETAILED_REPORT` | Detailed Ad level by Age & Gender | Ad |
-| `LOCATION_DETAILED_REPORT` | Detailed Ad level by Country & Region | Ad |
+| `AGE & GENDER_DETAILED_REPORT` | Detailed Daily Ad level by Age & Gender | Ad |
+| `LOCATION_DETAILED_REPORT` | Detailed Daily Ad level by Country & Region | Ad |
 
 ### 2. TikTok GMV
 *   **Task Types**:
@@ -213,17 +225,6 @@ For reports broken down by dimensions like Age, Gender, Region, etc.
   "store_id": "987654321"
 }
 ```
-
-### Running with Docker Compose
-
-    ```bash
-    docker-compose up -d --build
-    ```
-
-4.  **Access the Application:**
-    -   **API**: `http://localhost:8011`
-    -   **Dashboard**: `http://localhost:8011/dashboard`
-    -   **API Docs**: `http://localhost:8011/docs`
 
 ## 🔒 Security & Nginx
 
