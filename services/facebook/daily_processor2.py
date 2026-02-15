@@ -1,12 +1,13 @@
 """
-Enhanced Facebook Daily Reporter
-Two-Phase Fetching Strategy:
-1. Fetch insights data (with filtering)
-2. Fetch object metadata (ads/campaigns/etc)
-3. Join by ID
+Enhanced Facebook Daily Reporter V2
+Two-Phase Fetching Strategy với ID-based metadata:
+1. Fetch insights data (with filtering) → Get list of IDs
+2. Extract unique IDs from insights
+3. Fetch metadata for those specific IDs only
+4. Join by ID
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from services.facebook.base_processor import FacebookAdsBaseReporter
 import logging
 import json
@@ -17,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 class FacebookDailyReporterV2(FacebookAdsBaseReporter):
     """
-    Enhanced reporter với two-phase fetching:
-    - Phase 1: /insights endpoint (filterable)
-    - Phase 2: /ads endpoint (metadata)
-    - Join by ad_id
+    Enhanced reporter với ID-based metadata fetching:
+    - Phase 1: /insights endpoint → get ad_ids with spend > 0
+    - Phase 2: /{ad_id} endpoint → get metadata for specific IDs only
+    - Phase 3: Join by ad_id
     """
     
     def __init__(self, *args, **kwargs):
@@ -36,16 +37,7 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         template_config: Dict[str, Any],
         selected_fields: List[str]
     ) -> str:
-        """
-        Create URL for /insights endpoint.
-        This allows filtering by spend!
-        
-        Example:
-        /insights?level=ad&time_range={...}&time_increment=1
-                 &breakdowns=age,gender
-                 &filtering=[{'field':'spend','operator':'GREATER_THAN','value':'0'}]
-                 &fields=ad_id,spend,impressions,...
-        """
+        """Create URL for /insights endpoint with filtering"""
         level = template_config["api_params"]["level"]
         breakdowns = template_config["api_params"].get("breakdowns")
         time_increment = template_config["api_params"].get("time_increment", 1)
@@ -83,11 +75,11 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
             "time_range": json.dumps({"since": chunk["start"], "until": chunk["end"]}),
             "time_increment": time_increment,
             "fields": ",".join(insight_fields),
-            # "filtering": json.dumps([{
-            #     "field": "spend",
-            #     "operator": "GREATER_THAN",
-            #     "value": "0"
-            # }]),
+            "filtering": json.dumps([{
+                "field": "spend",
+                "operator": "GREATER_THAN",
+                "value": "0"
+            }]),
             "limit": 500
         }
         
@@ -102,29 +94,23 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         query_string = urlencode(params)
         
         url = f"{account['id']}/insights?{query_string}"
-        logger.debug(f"Insights URL: {url}")
         return url
     
-    # ==================== PHASE 2: METADATA ====================
+    # ==================== PHASE 2: METADATA BY ID ====================
     
-    def _create_metadata_url(
+    def _create_metadata_url_by_id(
         self,
-        account: Dict[str, str],
+        object_id: str,
         level: str,
-        template_config: Dict[str, Any],
-        selected_fields: List[str]
+        template_config: Dict[str, Any]
     ) -> str:
         """
-        Create URL for /ads (or /campaigns, etc) endpoint.
-        This gets object metadata (name, status, creative, etc).
+        Create URL for single object metadata by ID.
         
-        Example:
-        /ads?fields=id,name,status,effective_status,
-                    adset{id,name,bid_strategy,...},
-                    campaign{id,name},
-                    creative{...}
-             &effective_status=[...]
-             &limit=500
+        NEW APPROACH: Fetch specific object directly
+        Example: /120241209940710528?fields=id,name,creative{...}
+        
+        BENEFIT: Only fetch metadata for ads with spend > 0
         """
         object_fields_key = f"{level}_fields"
         api_object_fields = template_config.get(object_fields_key, [])
@@ -138,21 +124,40 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         
         # Build params
         params = {
-            "fields": ",".join(final_fields),
-            "limit": 500
+            "fields": ",".join(final_fields)
         }
-        
-        # Add effective_status filter
-        status_filter = EFFECTIVE_STATUS_FILTERS.get(level)
-        if status_filter:
-            params["effective_status"] = json.dumps(status_filter)
         
         from urllib.parse import urlencode
         query_string = urlencode(params, safe='{}(),')
         
-        url = f"{account['id']}/{level}s?{query_string}"
-        logger.debug(f"Metadata URL: {url}")
+        url = f"{object_id}?{query_string}"
         return url
+    
+    def _extract_unique_ids_from_insights(
+        self,
+        insights_data: List[Dict[str, Any]],
+        level: str
+    ) -> Set[str]:
+        """
+        Extract unique object IDs from insights data.
+        
+        Args:
+            insights_data: List of insight rows
+            level: ad, adset, campaign, etc.
+            
+        Returns:
+            Set of unique IDs
+        """
+        id_field = f"{level}_id"
+        unique_ids = set()
+        
+        for row in insights_data:
+            object_id = row.get(id_field)
+            if object_id:
+                unique_ids.add(object_id)
+        
+        logger.info(f"Extracted {len(unique_ids)} unique {level} IDs from insights")
+        return unique_ids
     
     # ==================== REQUEST PREPARATION ====================
     
@@ -184,30 +189,34 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         
         return requests
     
-    def _prepare_metadata_requests(
+    def _prepare_metadata_requests_by_ids(
         self,
-        accounts_to_process: List[Dict[str, str]],
-        template_config: Dict[str, Any],
-        selected_fields: List[str]
+        unique_ids: Set[str],
+        level: str,
+        template_config: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """Prepare metadata requests (Phase 2)"""
-        requests = []
-        level = template_config["api_params"]["level"]
+        """
+        Prepare metadata requests for specific IDs (Phase 2).
         
-        for account in accounts_to_process:
-            url = self._create_metadata_url(
-                account, level, template_config, selected_fields
+        NEW: Fetch metadata only for IDs that have insights data
+        """
+        requests = []
+        
+        for object_id in unique_ids:
+            url = self._create_metadata_url_by_id(
+                object_id, level, template_config
             )
             
             requests.append({
                 "url": url,
                 "metadata": {
-                    "account": account,
+                    "object_id": object_id,
                     "level": level,
                     "phase": "metadata"
                 }
             })
         
+        logger.info(f"Prepared {len(requests)} metadata requests for {level}s")
         return requests
     
     # ==================== PAGINATION HELPERS ====================
@@ -217,54 +226,32 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         response_body: Dict[str, Any],
         original_url: str
     ) -> Optional[str]:
-        """
-        Extract next URL from cursor-based pagination.
-        
-        Facebook API returns cursors in two formats:
-        1. Direct next URL: {"paging": {"next": "full_url"}}
-        2. Cursor only: {"paging": {"cursors": {"after": "..."}}}
-        
-        Args:
-            response_body: Response data
-            original_url: Original request URL (to build next URL if needed)
-            
-        Returns:
-            Next URL or None
-        """
+        """Extract next URL from cursor-based pagination"""
         paging = response_body.get("paging", {})
         
-        # Method 1: Direct next URL (most common)
+        # Method 1: Direct next URL
         if paging.get("next"):
             return paging["next"]
         
-        # Method 2: Cursor-based (need to build URL)
+        # Method 2: Build from cursor
         cursors = paging.get("cursors", {})
         after_cursor = cursors.get("after")
         
         if not after_cursor:
             return None
         
-        # Build next URL with after cursor
         from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
         
         try:
             parsed = urlparse(original_url)
             params = parse_qs(parsed.query, keep_blank_values=True)
-            
-            # Update/add after cursor
             params["after"] = [after_cursor]
-            
-            # Remove before cursor if exists
             params.pop("before", None)
             
-            # Rebuild query string
             new_query = urlencode(params, doseq=True)
-            
-            # Rebuild URL
             new_parsed = parsed._replace(query=new_query)
             next_url = urlunparse(new_parsed)
             
-            logger.debug(f"Built cursor URL with after={after_cursor[:10]}...")
             return next_url
             
         except Exception as e:
@@ -285,14 +272,11 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         id_field = f"{level}_id"
         
         for item in response_body.get("data", []):
-            # Flatten action metrics
             flattened = self._flatten_action_metrics(item, selected_fields)
             
-            # Add account info
             flattened["account_id"] = request_metadata["account"]["id"]
             flattened["account_name"] = request_metadata["account"]["name"]
             
-            # Ensure ID field exists
             if id_field not in flattened and "id" in flattened:
                 flattened[id_field] = flattened["id"]
             
@@ -300,118 +284,67 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         
         return extracted_rows
     
-    def _process_metadata_response(
+    def _process_metadata_response_by_id(
         self,
         response_body: Dict[str, Any],
         request_metadata: Dict[str, Any]
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        Process metadata response (Phase 2).
+        Process metadata response for single object (Phase 2).
+        
+        Response is the object itself, not wrapped in {"data": [...]}
         
         Returns:
-            Dict mapping {ad_id: metadata_dict}
+            Metadata dict for this object
         """
-        metadata_map = {}
+        object_id = request_metadata["object_id"]
         level = request_metadata["level"]
         
-        for item in response_body.get("data", []):
-            object_id = item.get("id")
-            if not object_id:
-                continue
-            
-            metadata = {"id": object_id, "name": item.get("name")}
-            
-            # Extract nested fields
-            if item.get("campaign"):
-                metadata["campaign_id"] = item["campaign"].get("id")
-                metadata["campaign_name"] = item["campaign"].get("name")
-            
-            if item.get("adset"):
-                metadata["adset_id"] = item["adset"].get("id")
-                metadata["adset_name"] = item["adset"].get("name")
-                metadata["adset_bid_strategy"] = item["adset"].get("bid_strategy")
-                
-                # Get bid amount from multiple sources
-                bid = (item["adset"].get("bid_amount") or 
-                       item["adset"].get("daily_budget") or 
-                       item["adset"].get("lifetime_budget"))
-                if bid:
-                    metadata["adset_bid_amount"] = bid
-            
-            if item.get("creative"):
-                creative = item["creative"]
-                metadata["creative_id"] = creative.get("id", "")
-                metadata["creative_name"] = creative.get("name", "")
-                metadata["creative_title"] = creative.get("title", "")
-                metadata["creative_body"] = creative.get("body", "")
-                
-                # Actor ID & Page Name
-                actor_id = str(creative.get("actor_id", ""))
-                metadata["actor_id"] = actor_id
-                metadata["page_name"] = self.page_map.get(actor_id, "Page không xác định")
-                
-                # Thumbnail
-                thumbnail_url = creative.get("thumbnail_url", "")
-                metadata["creative_thumbnail_url"] = f'=IMAGE("{thumbnail_url}")' if thumbnail_url else ""
-                metadata["creative_thumbnail_raw_url"] = thumbnail_url
-                
-                # Link
-                object_story_id = creative.get("object_story_id", "")
-                metadata["creative_link"] = f"https://facebook.com/{object_story_id}" if object_story_id else ""
-            
-            # Add other fields from template
-            for key, value in item.items():
-                if key not in ["id", "name", "campaign", "adset", "creative"]:
-                    metadata[key] = value
-            
-            metadata_map[object_id] = metadata
+        # Response is the object itself
+        item = response_body
         
-        return metadata_map
-    
-    # ==================== JOIN LOGIC ====================
-    
-    def _join_insights_with_metadata(
-        self,
-        insights_data: List[Dict[str, Any]],
-        metadata_map: Dict[str, Dict[str, Any]],
-        level: str
-    ) -> List[Dict[str, Any]]:
-        """
-        Join insights data with metadata.
+        metadata = {"id": object_id, "name": item.get("name")}
         
-        Args:
-            insights_data: List of insights rows
-            metadata_map: Dict of {object_id: metadata}
-            level: ad, adset, campaign, etc.
-            
-        Returns:
-            Combined data
-        """
-        id_field = f"{level}_id"
-        joined_data = []
+        # Extract nested fields
+        if item.get("campaign"):
+            metadata["campaign_id"] = item["campaign"].get("id")
+            metadata["campaign_name"] = item["campaign"].get("name")
         
-        for insight_row in insights_data:
-            object_id = insight_row.get(id_field)
+        if item.get("adset"):
+            metadata["adset_id"] = item["adset"].get("id")
+            metadata["adset_name"] = item["adset"].get("name")
+            metadata["adset_bid_strategy"] = item["adset"].get("bid_strategy")
             
-            if not object_id:
-                logger.warning(f"Missing {id_field} in insight row")
-                joined_data.append(insight_row)
-                continue
-            
-            # Get metadata
-            metadata = metadata_map.get(object_id, {})
-            
-            # Join: metadata first, then insight (insight overrides)
-            combined_row = {**metadata, **insight_row}
-            
-            # Rename id → {level}_id, name → {level}_name
-            if "id" in combined_row and level != "account":
-                combined_row[f"{level}_id"] = combined_row["id"]
-                combined_row[f"{level}_name"] = combined_row.get("name", "")
-            
-            joined_data.append(combined_row)
+            bid = (item["adset"].get("bid_amount") or 
+                   item["adset"].get("daily_budget") or 
+                   item["adset"].get("lifetime_budget"))
+            if bid:
+                metadata["adset_bid_amount"] = bid
         
-        return joined_data
+        if item.get("creative"):
+            creative = item["creative"]
+            metadata["creative_id"] = creative.get("id", "")
+            metadata["creative_name"] = creative.get("name", "")
+            metadata["creative_title"] = creative.get("title", "")
+            metadata["creative_body"] = creative.get("body", "")
+            
+            actor_id = str(creative.get("actor_id", ""))
+            metadata["actor_id"] = actor_id
+            metadata["page_name"] = self.page_map.get(actor_id, "Page không xác định")
+            
+            thumbnail_url = creative.get("thumbnail_url", "")
+            metadata["creative_thumbnail_url"] = f'=IMAGE("{thumbnail_url}")' if thumbnail_url else ""
+            metadata["creative_thumbnail_raw_url"] = thumbnail_url
+            
+            object_story_id = creative.get("object_story_id", "")
+            metadata["creative_link"] = f"https://facebook.com/{object_story_id}" if object_story_id else ""
+        
+        # Add other fields
+        for key, value in item.items():
+            if key not in ["id", "name", "campaign", "adset", "creative"]:
+                metadata[key] = value
+        
+        return metadata
     
     # ==================== WAVE PROCESSING ====================
     
@@ -422,7 +355,7 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
     ) -> Dict[str, Any]:
         """Process wave responses with phase detection"""
         data_rows = []
-        metadata_rows = []
+        metadata_map = {}
         next_wave_requests = []
         failed_requests = []
         
@@ -453,150 +386,67 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
                 )
                 data_rows.extend(rows)
                 
-                # Handle cursor-based pagination
+                # Handle pagination
                 next_url = self._extract_next_url_from_cursors(
                     response_body,
                     response.get("original_url", "")
                 )
                 
                 if next_url:
-                    logger.debug(f"Insights pagination: {len(rows)} rows, has next")
                     next_wave_requests.append({
                         "url": self._get_relative_url(next_url),
                         "metadata": metadata
                     })
             
             elif phase == "metadata":
-                metadata_map = self._process_metadata_response(
+                # Single object response
+                object_metadata = self._process_metadata_response_by_id(
                     response_body, metadata
                 )
-                metadata_rows.append(metadata_map)
-                
-                # Handle cursor-based pagination
-                next_url = self._extract_next_url_from_cursors(
-                    response_body,
-                    response.get("original_url", "")
-                )
-                
-                if next_url:
-                    logger.debug(f"Metadata pagination: {len(metadata_map)} objects, has next")
-                    next_wave_requests.append({
-                        "url": self._get_relative_url(next_url),
-                        "metadata": metadata
-                    })
+                object_id = metadata["object_id"]
+                metadata_map[object_id] = object_metadata
         
         return {
             "data_rows": data_rows,
-            "metadata_rows": metadata_rows,
+            "metadata_map": metadata_map,
             "next_wave_requests": next_wave_requests,
             "failed_requests": failed_requests
         }
     
-    # ==================== RETRY LOGIC ====================
+    # ==================== JOIN LOGIC ====================
     
-    def _retry_failed_requests(
+    def _join_insights_with_metadata(
         self,
-        failed_requests: List[Dict[str, Any]],
-        selected_fields: List[str],
-        phase: str
-    ) -> Dict[str, Any]:
-        """
-        Retry failed requests với batch processing.
+        insights_data: List[Dict[str, Any]],
+        metadata_map: Dict[str, Dict[str, Any]],
+        level: str
+    ) -> List[Dict[str, Any]]:
+        """Join insights data with metadata"""
+        id_field = f"{level}_id"
+        joined_data = []
         
-        Args:
-            failed_requests: List of failed request dicts
-            selected_fields: Selected fields
-            phase: "insights" or "metadata"
+        for insight_row in insights_data:
+            object_id = insight_row.get(id_field)
             
-        Returns:
-            {"data_rows": [...], "metadata_rows": [...]}
-        """
-        if not failed_requests:
-            return {"data_rows": [], "metadata_rows": []}
-        
-        logger.info(f"\n===== RETRY {phase.upper()}: {len(failed_requests)} requests =====")
-        import time
-        time.sleep(3)
-        
-        BATCH_SIZE = 10
-        MAX_RETRIES = 3
-        
-        all_data_rows = []
-        all_metadata_rows = []
-        
-        queue = [
-            {
-                "url": req["url"],
-                "metadata": req["metadata"],
-                "retry_count": 0
-            }
-            for req in failed_requests
-        ]
-        
-        while queue:
-            current_batch = queue[:BATCH_SIZE]
-            queue = queue[BATCH_SIZE:]
+            if not object_id:
+                logger.warning(f"Missing {id_field} in insight row")
+                joined_data.append(insight_row)
+                continue
             
-            batch_urls = [item["url"] for item in current_batch]
+            # Get metadata
+            metadata = metadata_map.get(object_id, {})
             
-            logger.info(f"➤ Retry batch: {len(current_batch)} items, {len(queue)} remaining")
+            # Join: metadata first, then insight (insight overrides)
+            combined_row = {**metadata, **insight_row}
             
-            try:
-                response_json = self._send_batch_request(batch_urls)
-                
-                if not response_json or "results" not in response_json:
-                    logger.error("Batch request failed")
-                    for item in current_batch:
-                        if item["retry_count"] < MAX_RETRIES:
-                            item["retry_count"] += 1
-                            queue.append(item)
-                    time.sleep(5)
-                    continue
-                
-                # Process results
-                for index, result in enumerate(response_json["results"]):
-                    queue_item = current_batch[index]
-                    
-                    if result["status_code"] == 200 and result.get("data"):
-                        # Attach metadata
-                        result["metadata"] = queue_item["metadata"]
-                        result["original_url"] = queue_item["url"]
-                        
-                        # Process based on phase
-                        wave_result = self._process_wave_responses([result], selected_fields)
-                        
-                        all_data_rows.extend(wave_result.get("data_rows", []))
-                        all_metadata_rows.extend(wave_result.get("metadata_rows", []))
-                        
-                        # Handle pagination
-                        for next_req in wave_result.get("next_wave_requests", []):
-                            queue.append({
-                                "url": next_req["url"],
-                                "metadata": next_req["metadata"],
-                                "retry_count": 0
-                            })
-                    else:
-                        # Retry
-                        if queue_item["retry_count"] < MAX_RETRIES:
-                            queue_item["retry_count"] += 1
-                            queue.append(queue_item)
-                
-            except Exception as e:
-                logger.error(f"Batch error: {e}")
-                for item in current_batch:
-                    if item["retry_count"] < MAX_RETRIES:
-                        item["retry_count"] += 1
-                        queue.append(item)
+            # Rename id → {level}_id, name → {level}_name
+            if "id" in combined_row and level != "account":
+                combined_row[f"{level}_id"] = combined_row["id"]
+                combined_row[f"{level}_name"] = combined_row.get("name", "")
             
-            if queue:
-                time.sleep(2)
+            joined_data.append(combined_row)
         
-        logger.info(f"✓ Retry complete: {len(all_data_rows)} data rows, {len(all_metadata_rows)} metadata objects")
-        
-        return {
-            "data_rows": all_data_rows,
-            "metadata_rows": all_metadata_rows
-        }
+        return joined_data
     
     # ==================== MAIN FUNCTION ====================
     
@@ -608,13 +458,11 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         template_name: str,
         selected_fields: List[str]
     ) -> List[Dict[str, Any]]:
-        """
-        Main function với two-phase fetching và retry logic.
-        """
+        """Main function với ID-based metadata fetching"""
         template_config = FacebookAdsBaseReporter.get_facebook_template_config_by_name(template_name)
         level = template_config["api_params"]["level"]
         
-        logger.info(f"Starting two-phase daily report: {start_date} → {end_date}")
+        logger.info(f"Starting two-phase report with ID-based metadata: {start_date} → {end_date}")
         self._report_progress("Bắt đầu lấy dữ liệu...", 5)
         
         # Load page map if needed
@@ -622,10 +470,7 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
             self.page_map = self.get_accessible_page_map()
         
         # Prepare date chunks
-        if (template_name == "LOCATION_DETAILED_REPORT" or template_name == "AGE & GENDER_DETAILED_REPORT"):
-            date_chunks = self._generate_monthly_date_chunks(start_date, end_date, factor = 6)
-        else:
-            date_chunks = self._generate_monthly_date_chunks(start_date, end_date, factor = 2)
+        date_chunks = self._generate_monthly_date_chunks(start_date, end_date)
         
         # ===== PHASE 1: FETCH INSIGHTS =====
         logger.info("\n===== PHASE 1: FETCHING INSIGHTS =====")
@@ -636,7 +481,6 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
         )
         
         all_insights_data = []
-        all_insights_failed = []
         requests_for_wave = insights_requests
         wave_count = 1
         
@@ -652,38 +496,35 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
             
             wave_result = self._process_wave_responses(responses, selected_fields)
             all_insights_data.extend(wave_result["data_rows"])
-            all_insights_failed.extend(wave_result["failed_requests"])
             requests_for_wave = wave_result["next_wave_requests"]
             wave_count += 1
         
-        logger.info(f"✓ Phase 1 complete: {len(all_insights_data)} rows, {len(all_insights_failed)} failed")
+        logger.info(f"✓ Phase 1 complete: {len(all_insights_data)} insight rows")
         
-        # Retry insights failures
-        if all_insights_failed:
-            logger.info(f"⚠ Retrying {len(all_insights_failed)} failed insights requests...")
-            retry_result = self._retry_failed_requests(
-                all_insights_failed,
-                selected_fields,
-                phase="insights"
-            )
-            all_insights_data.extend(retry_result["data_rows"])
-            logger.info(f"✓ Insights retry added {len(retry_result['data_rows'])} rows")
+        # Extract unique IDs from insights
+        unique_ids = self._extract_unique_ids_from_insights(all_insights_data, level)
         
-        # ===== PHASE 2: FETCH METADATA =====
-        logger.info("\n===== PHASE 2: FETCHING METADATA =====")
-        self._report_progress("Đang lấy object metadata...", 60)
+        if not unique_ids:
+            logger.warning("No IDs found in insights. Returning insights data only.")
+            return all_insights_data
         
-        metadata_requests = self._prepare_metadata_requests(
-            accounts_to_process, template_config, selected_fields
+        # ===== PHASE 2: FETCH METADATA BY ID =====
+        logger.info(f"\n===== PHASE 2: FETCHING METADATA FOR {len(unique_ids)} {level.upper()}S =====")
+        self._report_progress(f"Đang lấy metadata cho {len(unique_ids)} objects...", 60)
+        
+        # Mở giới hạn batch size để lấy metadata nhanh hơn
+        self.DEFAULT_BATCH_SIZE = 35
+
+        metadata_requests = self._prepare_metadata_requests_by_ids(
+            unique_ids, level, template_config
         )
         
-        all_metadata_maps = []
-        all_metadata_failed = []
+        combined_metadata = {}
         requests_for_wave = metadata_requests
         wave_count = 1
         
         while requests_for_wave:
-            logger.info(f"Processing metadata wave {wave_count}...")
+            logger.info(f"Processing metadata wave {wave_count}: {len(requests_for_wave)} requests")
             
             responses = self._execute_wave(
                 requests_for_wave,
@@ -693,26 +534,9 @@ class FacebookDailyReporterV2(FacebookAdsBaseReporter):
             )
             
             wave_result = self._process_wave_responses(responses, selected_fields)
-            all_metadata_maps.extend(wave_result["metadata_rows"])
-            all_metadata_failed.extend(wave_result["failed_requests"])
+            combined_metadata.update(wave_result["metadata_map"])
             requests_for_wave = wave_result["next_wave_requests"]
             wave_count += 1
-        
-        # Retry metadata failures
-        if all_metadata_failed:
-            logger.info(f"⚠ Retrying {len(all_metadata_failed)} failed metadata requests...")
-            retry_result = self._retry_failed_requests(
-                all_metadata_failed,
-                selected_fields,
-                phase="metadata"
-            )
-            all_metadata_maps.extend(retry_result["metadata_rows"])
-            logger.info(f"✓ Metadata retry added {len(retry_result['metadata_rows'])} objects")
-        
-        # Merge all metadata maps
-        combined_metadata = {}
-        for metadata_map in all_metadata_maps:
-            combined_metadata.update(metadata_map)
         
         logger.info(f"✓ Phase 2 complete: {len(combined_metadata)} objects")
         
@@ -747,7 +571,7 @@ if __name__ == "__main__":
     # Template config example
     template_name = "LOCATION_DETAILED_REPORT"
     accounts = [
-        {"id": "act_650248897235348", "name": "Cara Luna 02"}
+        {"id": "act_948290596967304", "name": "Cara Luna 02"}
     ]
     
     data = reporter.get_report(

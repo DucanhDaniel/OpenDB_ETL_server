@@ -55,6 +55,7 @@ class FacebookAdsWorker(BaseReportWorker):
         Facebook reporter returns flattened data directly.
         """
         logger.info(f"[Job {self.job_id}] Starting Facebook Daily worker")
+        self.currency_service.load_config()
         
         reporter = None
         data = []
@@ -90,6 +91,10 @@ class FacebookAdsWorker(BaseReportWorker):
                 template_name=template_name,
                 selected_fields=selected_fields
             )
+
+            if data:
+                self._send_progress("RUNNING", "Applying currency exchange...", 90)
+                data = self.currency_service.apply_exchange(data)
             
             self.api_rows = len(data)
             

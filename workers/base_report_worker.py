@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta, timezone
 from abc import ABC, abstractmethod
 from services.sheet_writer.gg_sheet_writer import GoogleSheetWriter
 import os
+from services.currency.exchange_rate_service import CurrencyExchangeService
 
 CREDENTIALS_PATH = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
 
@@ -30,13 +31,6 @@ class BaseReportWorker(ABC):
     ):
         """
         Initialize worker.
-        
-        Args:
-            context: Request context chứa job_id, task_type, dates, etc.
-            db_client: MongoDB client
-            redis_client: Redis client
-            sheet_writer: Google Sheet writer
-            progress_callback: Function để report progress
         """
         self.context = context
         self.db_client = db_client
@@ -47,7 +41,11 @@ class BaseReportWorker(ABC):
         self.task_id = context["task_id"]
         self.task_type = context["task_type"]
         
-        self.sheet_writer = GoogleSheetWriter(CREDENTIALS_PATH, context["spreadsheet_id"])
+        self.spreadsheet_id = context["spreadsheet_id"]
+        self.sheet_writer = GoogleSheetWriter(CREDENTIALS_PATH, self.spreadsheet_id)
+        
+        # Initialize Currency Exchange Service
+        self.currency_service = CurrencyExchangeService(self.spreadsheet_id)
         
         # Stats
         self.api_usage = {}
@@ -280,6 +278,9 @@ class BaseReportWorker(ABC):
         try:
             # Step 1: Initialize
             self._send_progress("RUNNING", "Initializing...", 0)
+            
+            
+            
             reporter = self._create_reporter()
             
             # Step 2: Determine data freshness boundary
@@ -327,6 +328,9 @@ class BaseReportWorker(ABC):
             
             # Step 8: Combine data and write to sheet
             final_data = cached_data + flattened_api_data
+            
+            # Apply Currency Exchange (Account-level multiplier)
+
             
             message = "No data to write"
             if final_data:

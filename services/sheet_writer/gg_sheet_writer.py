@@ -421,3 +421,26 @@ class GoogleSheetWriter:
         if url and isinstance(url, str) and url.startswith(('http://', 'https://')):
             return f'=IMAGE("{url}")'
         return ""
+
+    def read_sheet_data(self, sheet_name: str) -> List[Dict[str, Any]]:
+        """
+        Đọc toàn bộ dữ liệu từ sheet.
+        
+        Args:
+            sheet_name: Tên sheet cần đọc
+        
+        Returns:
+            List[Dict]: Danh sách các dòng dữ liệu (dạng dict)
+        """
+        try:
+            worksheet = self._get_or_create_worksheet(sheet_name)
+            
+            def _get_all_records():
+                return worksheet.get_all_records()
+            
+            data = self._retry_operation(_get_all_records, f"Read all records from '{sheet_name}'")
+            logger.info(f"Đã đọc {len(data)} dòng từ sheet '{sheet_name}'")
+            return data
+        except Exception as e:
+            logger.error(f"Lỗi khi đọc sheet '{sheet_name}': {e}")
+            return []
